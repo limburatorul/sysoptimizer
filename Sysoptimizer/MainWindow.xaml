@@ -137,7 +137,7 @@
                     <StackPanel Margin="16" VerticalAlignment="Top">
                         <TextBlock Text="Free up memory" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
                         <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,16"
-                                   Text="Empties every process's working set — inactive memory goes back to the pagefile and free RAM increases right away. Active applications rebuild theirs on the fly, with no visible impact." />
+                                   Text="Trims every process's working set: its pages move to standby or the pagefile, and free RAM rises right away. Apps read back what they use next, so they can feel slower for a moment. It doesn't make Windows faster in general." />
                         <Button Content="Free memory now" Style="{StaticResource PrimaryButton}"
                                 HorizontalAlignment="Left" Click="TrimMemory_Click" />
                     </StackPanel>
@@ -263,7 +263,7 @@
                             <Button Content="Remove selected" Style="{StaticResource PrimaryButton}" Click="RemoveBloatware_Click" />
                         </StackPanel>
                         <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
-                                   Text="Pre-installed apps most people never open. Removing one only affects this PC — reinstall anytime from the Microsoft Store." />
+                                   Text="Pre-installed apps most people never open. Removing one affects this PC only; most can be reinstalled from the Microsoft Store." />
                         <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                             <ItemsControl x:Name="BloatwareList">
                                 <ItemsControl.ItemsPanel>

@@ -4,18 +4,19 @@ namespace Sysoptimizer.Services;
 
 public static class ServiceManager
 {
-    public static readonly (string Key, string Name, string Description)[] KnownServices =
+    // DefaultStart is Windows' own startup type, what "Re-enable" puts back.
+    public static readonly (string Key, string Name, string Description, string DefaultStart)[] KnownServices =
     {
-        ("DiagTrack", "Connected User Experiences and Telemetry", "Sends diagnostic and usage data to Microsoft"),
-        ("dmwappushservice", "WAP Push Message Routing", "Device-management push service, rarely needed at home"),
-        ("SysMain", "SysMain (Superfetch)", "Preloads apps into RAM — useful on HDD, useless or harmful on SSD"),
-        ("WSearch", "Windows Search", "Indexes files for fast search; a constant CPU/disk cost"),
-        ("Fax", "Fax", "Fax service, almost never used"),
-        ("RemoteRegistry", "Remote Registry", "Allows the registry to be edited remotely"),
-        ("MapsBroker", "Downloaded Maps Manager", "Updates downloaded offline maps"),
-        ("PrintNotify", "Printer Extensions and Notifications", "Printer notifications; useless without a printer"),
-        ("RetailDemo", "Retail Demo Service", "Store-display demo mode"),
-        ("WerSvc", "Windows Error Reporting Service", "Sends error reports to Microsoft"),
+        ("DiagTrack", "Connected User Experiences and Telemetry", "Sends diagnostic and usage data to Microsoft", "auto"),
+        ("dmwappushservice", "WAP Push Message Routing", "Device-management push service, rarely needed at home", "demand"),
+        ("SysMain", "SysMain (Superfetch)", "Preloads often-used apps into RAM; helps most on hard drives, less on SSDs", "auto"),
+        ("WSearch", "Windows Search", "Indexes files so search is fast; without it, Start and Explorer search are slower", "delayed-auto"),
+        ("Fax", "Fax", "Fax service, almost never used", "demand"),
+        ("RemoteRegistry", "Remote Registry", "Allows the registry to be edited remotely", "demand"),
+        ("MapsBroker", "Downloaded Maps Manager", "Updates downloaded offline maps", "delayed-auto"),
+        ("PrintNotify", "Printer Extensions and Notifications", "Printer notifications; not needed without a printer", "demand"),
+        ("RetailDemo", "Retail Demo Service", "Store-display demo mode", "demand"),
+        ("WerSvc", "Windows Error Reporting Service", "Sends error reports to Microsoft", "demand"),
     };
 
     public static string GetStatus(string serviceName)
@@ -35,7 +36,8 @@ public static class ServiceManager
 
     public static void EnableAndStart(string serviceName)
     {
-        RunSc($"config \"{serviceName}\" start= demand");
+        var start = KnownServices.FirstOrDefault(s => s.Key == serviceName).DefaultStart ?? "demand";
+        RunSc($"config \"{serviceName}\" start= {start}");
         RunSc($"start \"{serviceName}\"");
     }
 

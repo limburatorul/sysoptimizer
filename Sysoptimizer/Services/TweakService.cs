@@ -13,7 +13,7 @@ public static class TweakService
         new Tweak
         {
             Name = "Windows telemetry",
-            Description = "Blocks diagnostic data collection sent to Microsoft",
+            Description = "Sets diagnostic data to the lowest level Windows allows: off on Enterprise and Education, Required only on Home and Pro",
             IsApplied = () => ReadDword(Registry.LocalMachine, @"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry") == 0,
             Apply = () => WriteDword(Registry.LocalMachine, @"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry", 0),
             Revert = () => DeleteValue(Registry.LocalMachine, @"SOFTWARE\Policies\Microsoft\Windows\DataCollection", "AllowTelemetry"),
@@ -81,7 +81,7 @@ public static class TweakService
         new Tweak
         {
             Name = "Hibernation",
-            Description = "Disables hibernation and removes hiberfil.sys (frees disk space equal to installed RAM)",
+            Description = "Disables hibernation and removes hiberfil.sys, freeing disk space; Fast Startup and hybrid sleep go with it",
             IsApplied = () => !File.Exists(Path.Combine(Environment.GetEnvironmentVariable("SystemDrive") ?? "C:", "hiberfil.sys")),
             Apply = () => RunPowercfg("/hibernate off"),
             Revert = () => RunPowercfg("/hibernate on"),
