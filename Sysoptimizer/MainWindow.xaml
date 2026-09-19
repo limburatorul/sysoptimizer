@@ -1,0 +1,304 @@
+<Window x:Class="Sysoptimizer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Sysoptimizer" Height="640" Width="880" MinHeight="480" MinWidth="680"
+        Background="Transparent" FontSize="13">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="160" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource Surface}">
+            <TabControl x:Name="Tabs">
+
+                <TabItem Header="Resources">
+                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                        <StackPanel Margin="16">
+                            <DockPanel Margin="0,0,0,12">
+                                <TextBlock DockPanel.Dock="Left" Text="Show last" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                    <RadioButton Content="30s" GroupName="Duration" Tag="30" Style="{StaticResource PillToggle}" Checked="DurationPill_Checked" />
+                                    <RadioButton Content="1m" GroupName="Duration" Tag="60" Style="{StaticResource PillToggle}" IsChecked="True" Margin="6,0,0,0" Checked="DurationPill_Checked" />
+                                    <RadioButton Content="2m" GroupName="Duration" Tag="120" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="DurationPill_Checked" />
+                                    <RadioButton Content="5m" GroupName="Duration" Tag="300" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="DurationPill_Checked" />
+                                </StackPanel>
+                            </DockPanel>
+                            <StackPanel>
+                                <Border x:Name="CpuCardBorder" Height="150" Margin="0,0,0,10" Padding="14" CornerRadius="8" BorderBrush="{StaticResource Border}" BorderThickness="1" ClipToBounds="True">
+                                    <Grid x:Name="CpuGraphGrid">
+                                        <Path x:Name="CpuAreaFill" Fill="{StaticResource AreaFillCpu}" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                                        <Path x:Name="CpuSparkline" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{StaticResource AccentCpu}" StrokeThickness="1.5"
+                                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Effect="{StaticResource LineGlowCpu}" />
+                                        <StackPanel VerticalAlignment="Top">
+                                            <TextBlock Text="CPU" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                            <TextBlock x:Name="CpuPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                <Border x:Name="MemCardBorder" Height="150" Margin="0,0,0,10" Padding="14" CornerRadius="8" BorderBrush="{StaticResource Border}" BorderThickness="1" ClipToBounds="True">
+                                    <Grid x:Name="MemGraphGrid">
+                                        <Path x:Name="MemAreaFill" Fill="{StaticResource AreaFillMem}" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                                        <Path x:Name="MemSparkline" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{StaticResource AccentMem}" StrokeThickness="1.5"
+                                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Effect="{StaticResource LineGlowMem}" />
+                                        <StackPanel VerticalAlignment="Top">
+                                            <TextBlock Text="MEMORY" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                            <TextBlock x:Name="MemPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
+                                            <TextBlock x:Name="MemDetailText" Text="0 / 0 GB" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                <Border x:Name="GpuCardBorder" Height="150" Padding="14" CornerRadius="8" BorderBrush="{StaticResource Border}" BorderThickness="1" ClipToBounds="True">
+                                    <Grid x:Name="GpuGraphGrid">
+                                        <Path x:Name="GpuAreaFill" Fill="{StaticResource AreaFillGpu}" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                                        <Path x:Name="GpuSparkline" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{StaticResource AccentGpu}" StrokeThickness="1.5"
+                                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Effect="{StaticResource LineGlowGpu}" />
+                                        <StackPanel VerticalAlignment="Top">
+                                            <TextBlock Text="GPU" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                            <TextBlock x:Name="GpuPercentText" Text="—" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
+                                            <TextBlock x:Name="GpuDetailText" Text="Not available" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="Disks">
+                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                        <ItemsControl x:Name="DiskCardsHost" Margin="16">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="2" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="Network">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                            <TextBlock Text="DNS" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,0,0,8" />
+                            <DockPanel>
+                                <ComboBox x:Name="DnsAdapterCombo" DockPanel.Dock="Left" Width="200" Margin="0,0,10,0" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Automatic" Tag="0" Click="SetDns_Click" Margin="0,0,6,0" />
+                                    <Button Content="Cloudflare" Tag="1" Click="SetDns_Click" Margin="0,0,6,0" />
+                                    <Button Content="Google" Tag="2" Click="SetDns_Click" Margin="0,0,6,0" />
+                                    <Button Content="Quad9" Tag="3" Click="SetDns_Click" />
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="NetCardsHost">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="2" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Cleanup">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Analyze" Click="AnalyzeCleanup_Click" Margin="0,0,8,0" />
+                            <Button Content="Clean selected" Style="{StaticResource PrimaryButton}" Click="Clean_Click" />
+                        </StackPanel>
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="CleanupList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{StaticResource TextSecondary}"
+                                                           VerticalAlignment="Top" Typography.NumeralAlignment="Tabular" />
+                                                <CheckBox IsChecked="{Binding IsChecked}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                                    </StackPanel>
+                                                </CheckBox>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Memory">
+                    <StackPanel Margin="16" VerticalAlignment="Top">
+                        <TextBlock Text="Free up memory" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,16"
+                                   Text="Empties every process's working set — inactive memory goes back to the pagefile and free RAM increases right away. Active applications rebuild theirs on the fly, with no visible impact." />
+                        <Button Content="Free memory now" Style="{StaticResource PrimaryButton}"
+                                HorizontalAlignment="Left" Click="TrimMemory_Click" />
+                    </StackPanel>
+                </TabItem>
+
+                <TabItem Header="Services">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Re-enable selected" Click="EnableServices_Click" Margin="0,0,8,0" />
+                            <Button Content="Stop and disable selected" Style="{StaticResource PrimaryButton}" Click="DisableServices_Click" />
+                        </StackPanel>
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="ServicesList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Top" />
+                                                <CheckBox IsChecked="{Binding IsChecked}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                                    </StackPanel>
+                                                </CheckBox>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Startup">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Enable selected" Click="EnableStartup_Click" Margin="0,0,8,0" />
+                            <Button Content="Disable selected" Style="{StaticResource PrimaryButton}" Click="DisableStartup_Click" />
+                        </StackPanel>
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="StartupList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Top" />
+                                                <CheckBox IsChecked="{Binding IsChecked}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </CheckBox>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Tweaks">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Create restore point" Click="CreateRestorePoint_Click" Margin="0,0,8,0" />
+                            <Button Content="Restart Explorer" Click="RestartExplorer_Click" Margin="0,0,16,0" />
+                            <Button Content="Export..." Click="ExportTweaks_Click" Margin="0,0,8,0" />
+                            <Button Content="Import..." Click="ImportTweaks_Click" Margin="0,0,16,0" />
+                            <Button Content="Revert selected" Click="RevertTweaks_Click" Margin="0,0,8,0" />
+                            <Button Content="Apply selected" Style="{StaticResource PrimaryButton}" Click="ApplyTweaks_Click" />
+                        </StackPanel>
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="TweaksList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{StaticResource Accent}" VerticalAlignment="Top" FontSize="11" />
+                                                <CheckBox IsChecked="{Binding IsChecked}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                                    </StackPanel>
+                                                </CheckBox>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Apps">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Update all (winget)" Click="UpgradeAll_Click" Margin="0,0,8,0" />
+                            <Button Content="Install selected" Style="{StaticResource PrimaryButton}" Click="InstallApps_Click" />
+                        </StackPanel>
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="AppsList">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6"
+                                                Padding="10" Margin="0,0,10,10" Width="220">
+                                            <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Name}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Debloat">
+                    <DockPanel Margin="16">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Remove selected" Style="{StaticResource PrimaryButton}" Click="RemoveBloatware_Click" />
+                        </StackPanel>
+                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
+                                   Text="Pre-installed apps most people never open. Removing one only affects this PC — reinstall anytime from the Microsoft Store." />
+                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                            <ItemsControl x:Name="BloatwareList">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6"
+                                                Padding="10" Margin="0,0,10,10" Width="220">
+                                            <CheckBox IsChecked="{Binding IsChecked}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Note}" Foreground="{StaticResource TextSecondary}" FontSize="10" />
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+            </TabControl>
+        </Border>
+
+        <Border Grid.Row="1" Background="{StaticResource SurfaceElevated}" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0">
+            <DockPanel Margin="16,10">
+                <TextBlock DockPanel.Dock="Top" Text="Log" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,0,0,4" />
+                <ScrollViewer Style="{StaticResource GlassScrollViewer}" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="LogText" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
