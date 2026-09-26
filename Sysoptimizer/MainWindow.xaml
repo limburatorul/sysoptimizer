@@ -294,7 +294,15 @@
 
         <Border Grid.Row="1" Background="{StaticResource SurfaceElevated}" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0">
             <DockPanel Margin="16,10">
-                <TextBlock DockPanel.Dock="Top" Text="Log" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,0,0,4" />
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource TextSecondary}" FontSize="11">
+                        <TextBlock.Resources><Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{StaticResource Accent}" /></Style></TextBlock.Resources>
+                        Feedback: <Hyperlink NavigateUri="mailto:feedback@protagonistlabs.app?subject=Sysoptimizer%20feedback" RequestNavigate="Link_Navigate">feedback@protagonistlabs.app</Hyperlink>
+                        · <Hyperlink NavigateUri="https://protagonistlabs.app/sysoptimizer/?utm_source=app&amp;utm_medium=sysoptimizer" RequestNavigate="Link_Navigate">Website</Hyperlink>
+                        · <Hyperlink NavigateUri="https://protagonistlabs.app/?utm_source=app&amp;utm_medium=sysoptimizer" RequestNavigate="Link_Navigate">More apps from Protagonist Labs</Hyperlink>
+                    </TextBlock>
+                    <TextBlock Text="Log" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                </DockPanel>
                 <ScrollViewer Style="{StaticResource GlassScrollViewer}" VerticalScrollBarVisibility="Auto">
                     <TextBlock x:Name="LogText" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" />
                 </ScrollViewer>

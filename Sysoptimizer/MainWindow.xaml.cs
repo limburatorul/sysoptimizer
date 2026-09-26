@@ -95,6 +95,12 @@ public partial class MainWindow : Window
         Log("Ready. " + (WingetService.IsWingetAvailable() ? "winget detected." : "winget is missing — install App Installer from the Microsoft Store."));
     }
 
+    private void Link_Navigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        e.Handled = true;
+    }
+
     private void Log(string message) => LogText.Text += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
 
     // --- Resources ---
