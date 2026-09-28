@@ -19,7 +19,17 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<OptionItem> _appItems = new();
     private readonly ObservableCollection<OptionItem> _startupItems = new();
     private readonly ObservableCollection<OptionItem> _bloatwareItems = new();
+    private readonly ObservableCollection<DuplicateGroupView> _duplicateGroups = new();
+    private readonly ObservableCollection<OptionItem> _largeFileItems = new();
+    private readonly ObservableCollection<OptionItem> _installedAppItems = new();
+    private readonly ObservableCollection<OptionItem> _leftoverItems = new();
     private readonly List<Tweak> _tweaks = TweakService.GetTweaks();
+
+    private class DuplicateGroupView
+    {
+        public required string Header;
+        public required ObservableCollection<OptionItem> Files;
+    }
 
     private ResourceMonitor? _resourceMonitor;
     private DispatcherTimer? _resourceTimer;
@@ -89,6 +99,16 @@ public partial class MainWindow : Window
 
         foreach (var (name, package) in BloatwareService.KnownBloat)
             _bloatwareItems.Add(new OptionItem { Name = name, Note = BloatwareService.IsInstalled(package) ? "" : "Not installed", Tag = package });
+
+        DuplicatesList.ItemsSource = _duplicateGroups;
+        LargeFilesList.ItemsSource = _largeFileItems;
+        InstalledAppsList.ItemsSource = _installedAppItems;
+        LeftoversList.ItemsSource = _leftoverItems;
+
+        foreach (var app in UninstallService.GetInstalledApps())
+            _installedAppItems.Add(new OptionItem { Name = app.Name, Description = $"{app.Publisher} {app.Version}".Trim(), Tag = app });
+
+        RefreshHealth();
 
         DnsAdapterCombo.ItemsSource = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
@@ -507,6 +527,146 @@ public partial class MainWindow : Window
 
     private static string FirstLine(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "unknown error";
+
+    // --- Health ---
+
+    private void RefreshHealth()
+    {
+        var report = HealthService.Check();
+        HealthScoreText.Text = $"{report.Score}";
+        HealthIssuesList.ItemsSource = report.Issues;
+    }
+
+    private async void OptimizeNow_Click(object sender, RoutedEventArgs e)
+    {
+        OptimizeNowButton.IsEnabled = false;
+        Log("Optimizing...");
+        var lines = await Task.Run(HealthService.Optimize);
+        foreach (var line in lines) Log(line);
+
+        foreach (var item in _cleanupItems) item.Note = CleanupService.FormatSize(CleanupService.GetSize(((Func<string?>)item.Tag!)()));
+        foreach (var item in _serviceItems) item.Note = ServiceManager.GetStatus((string)item.Tag!);
+        CleanupList.Items.Refresh();
+        ServicesList.Items.Refresh();
+        RefreshHealth();
+        OptimizeNowButton.IsEnabled = true;
+        Log("Optimize complete.");
+    }
+
+    // --- Duplicate files ---
+
+    private void BrowseDuplicatesFolder_Click(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog();
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) DuplicatesFolderBox.Text = dialog.SelectedPath;
+    }
+
+    private async void ScanDuplicates_Click(object sender, RoutedEventArgs e)
+    {
+        string folder = DuplicatesFolderBox.Text.Trim();
+        if (!Directory.Exists(folder)) { Log("Pick a folder that exists first."); return; }
+
+        Log($"Scanning {folder} for duplicates...");
+        var groups = await Task.Run(() => FileScanService.FindDuplicates(folder));
+        _duplicateGroups.Clear();
+        foreach (var group in groups)
+        {
+            var files = new ObservableCollection<OptionItem>();
+            for (int i = 0; i < group.Paths.Count; i++)
+                files.Add(new OptionItem { Description = group.Paths[i], IsChecked = i > 0, Tag = group.Paths[i] }); // first copy kept by default
+            _duplicateGroups.Add(new DuplicateGroupView { Header = $"{CleanupService.FormatSize(group.Size)} × {group.Paths.Count} copies", Files = files });
+        }
+        Log($"Found {groups.Count} duplicate group{(groups.Count == 1 ? "" : "s")}.");
+    }
+
+    private void DeleteDuplicates_Click(object sender, RoutedEventArgs e)
+    {
+        long freed = 0;
+        int deleted = 0;
+        foreach (var group in _duplicateGroups.ToList())
+        {
+            foreach (var file in group.Files.Where(f => f.IsChecked).ToList())
+            {
+                try { freed += new FileInfo((string)file.Tag!).Length; File.Delete((string)file.Tag!); deleted++; group.Files.Remove(file); }
+                catch (Exception ex) { Log($"{file.Description}: failed — {ex.Message}"); }
+            }
+            if (group.Files.Count < 2) _duplicateGroups.Remove(group);
+        }
+        Log($"Deleted {deleted} files, {CleanupService.FormatSize(freed)} freed.");
+    }
+
+    // --- Large files ---
+
+    private void BrowseLargeFilesFolder_Click(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog();
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) LargeFilesFolderBox.Text = dialog.SelectedPath;
+    }
+
+    private async void ScanLargeFiles_Click(object sender, RoutedEventArgs e)
+    {
+        string folder = LargeFilesFolderBox.Text.Trim();
+        if (!Directory.Exists(folder)) { Log("Pick a folder that exists first."); return; }
+
+        Log($"Scanning {folder} for large files...");
+        var files = await Task.Run(() => FileScanService.FindLargest(folder));
+        _largeFileItems.Clear();
+        foreach (var file in files)
+            _largeFileItems.Add(new OptionItem { Name = Path.GetFileName(file.Path), Description = file.Path, Note = CleanupService.FormatSize(file.Size), Tag = file.Path });
+        Log($"Found {files.Count} files.");
+    }
+
+    private void DeleteLargeFiles_Click(object sender, RoutedEventArgs e)
+    {
+        long freed = 0;
+        int deleted = 0;
+        foreach (var item in _largeFileItems.Where(i => i.IsChecked).ToList())
+        {
+            try { freed += new FileInfo((string)item.Tag!).Length; File.Delete((string)item.Tag!); deleted++; _largeFileItems.Remove(item); }
+            catch (Exception ex) { Log($"{item.Name}: failed — {ex.Message}"); }
+        }
+        Log($"Deleted {deleted} files, {CleanupService.FormatSize(freed)} freed.");
+    }
+
+    // --- Uninstall ---
+
+    private async void UninstallApps_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var item in _installedAppItems.Where(i => i.IsChecked).ToList())
+        {
+            var app = (InstalledApp)item.Tag!;
+            Log($"{app.Name}: launching uninstaller...");
+            var (ok, message) = await Task.Run(() =>
+            {
+                bool result = UninstallService.Uninstall(app, out string msg);
+                return (result, msg);
+            });
+            if (!ok) { Log($"{app.Name}: failed — {message}"); continue; }
+
+            _installedAppItems.Remove(item);
+            string? leftover = UninstallService.FindLeftoverFolder(app);
+            if (leftover != null)
+            {
+                _leftoverItems.Add(new OptionItem { Name = app.Name, Description = leftover, Tag = leftover });
+                DeleteLeftoversButton.Visibility = Visibility.Visible;
+                Log($"{app.Name}: uninstalled — its install folder is still there.");
+            }
+            else
+            {
+                Log($"{app.Name}: uninstalled.");
+            }
+        }
+    }
+
+    private void DeleteLeftovers_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var item in _leftoverItems.Where(i => i.IsChecked).ToList())
+        {
+            try { Directory.Delete((string)item.Tag!, recursive: true); Log($"{item.Name}: leftover folder removed."); _leftoverItems.Remove(item); }
+            catch (Exception ex) { Log($"{item.Name}: failed — {ex.Message}"); }
+        }
+        if (_leftoverItems.Count == 0) DeleteLeftoversButton.Visibility = Visibility.Collapsed;
+    }
 
     /// <summary>
     /// Border.ClipToBounds clips children to the rectangular layout box, not the rounded silhouette its

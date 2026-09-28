@@ -62,7 +62,7 @@ public static class ThemeManager
     {
         var theme = Themes.FirstOrDefault(t => t.Key == themeKey) ?? Themes[0];
 
-        var merged = Application.Current.Resources.MergedDictionaries;
+        var merged = System.Windows.Application.Current.Resources.MergedDictionaries;
         var dictionary = new ResourceDictionary { Source = new Uri($"pack://application:,,,/Themes/{theme.Key}.xaml", UriKind.Absolute) };
         int existing = merged.ToList().FindIndex(d => d.Source?.OriginalString.Contains("Themes/") == true);
         if (existing >= 0) merged[existing] = dictionary; else merged.Insert(0, dictionary);

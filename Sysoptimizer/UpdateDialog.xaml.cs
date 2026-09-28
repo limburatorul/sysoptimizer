@@ -48,7 +48,7 @@ public partial class UpdateDialog : Window
             var installer = await Updater.Download(_release, progress, _cancel.Token);
             Status.Text = "Installing — Sysoptimizer will restart.";
             Updater.InstallAndRestart(installer);
-            Application.Current.Shutdown(); // the installer replaces our files; nothing of ours may stay
+            System.Windows.Application.Current.Shutdown(); // the installer replaces our files; nothing of ours may stay
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
