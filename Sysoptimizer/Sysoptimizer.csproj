@@ -8,9 +8,14 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Sysoptimizer</AssemblyName>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Product>Sysoptimizer</Product>
     <Company>Protagonist Labs</Company>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="app.ico" />
+  </ItemGroup>
 
 </Project>

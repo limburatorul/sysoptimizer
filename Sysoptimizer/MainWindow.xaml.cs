@@ -48,7 +48,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         SourceInitialized += (_, _) => EnableAcrylic();
-        Closed += (_, _) => { _resourceTimer?.Stop(); _resourceMonitor?.Dispose(); CompositionTarget.Rendering -= OnRendering; };
+        Closed += (_, _) => { _resourceTimer?.Stop(); _resourceMonitor?.Dispose(); CompositionTarget.Rendering -= OnRendering; ThemeManager.ThemeChanged -= OnThemeChanged; };
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, _ => ThemeGlass }).IsChecked = true;
 
         _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false });
         _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false });
@@ -159,7 +161,7 @@ public partial class MainWindow : Window
     {
         if (cards.TryGetValue(name, out var existing)) return existing;
 
-        var card = MetricCard.Build(this, name, speedLabel, latencyLabel);
+        var card = MetricCard.Build(name, speedLabel, latencyLabel);
         cards[name] = card;
         host.Items.Add(card.Root);
         _liveGraphs.Add(new GraphBinding { Container = card.SpeedGraph, Line = card.SpeedLine, Fill = card.SpeedFill, History = card.SpeedHistory, AutoScale = true });
@@ -472,6 +474,9 @@ public partial class MainWindow : Window
     private struct Margins { public int Left, Right, Top, Bottom; }
 
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_CAPTION_COLOR = 35;
+    private const int DWMWA_TEXT_COLOR = 36;
     private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     private const int DWMSBT_ACRYLIC = 3;
 
@@ -480,7 +485,7 @@ public partial class MainWindow : Window
     /// CornerRadius actually paints — a full-bleed graph behind the card's text otherwise pokes square
     /// corners out past the rounded card underneath it.
     /// </summary>
-    private static void ApplyRoundedClip(System.Windows.Controls.Border border)
+    private void ApplyRoundedClip(System.Windows.Controls.Border border)
     {
         void Update()
         {
@@ -489,7 +494,36 @@ public partial class MainWindow : Window
             border.Clip = new RectangleGeometry(new Rect(0, 0, border.ActualWidth, border.ActualHeight), radius, radius);
         }
         border.SizeChanged += (_, _) => Update();
+        _clipUpdaters.Add(Update);
         Update();
+    }
+
+    private readonly List<Action> _clipUpdaters = new();
+
+    private void Theme_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.RadioButton { Tag: string key } && key != ThemeManager.Current.Key)
+            ThemeManager.Apply(key);
+    }
+
+    private void OnThemeChanged()
+    {
+        ApplyChrome();
+        // The corner radius is a resource reference; wait for it to settle before re-cutting the clips.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => _clipUpdaters.ForEach(update => update()));
+    }
+
+    /// <summary>Title bar colors follow the theme (Windows 11); Glass keeps the system look.</summary>
+    private void ApplyChrome()
+    {
+        if (PresentationSource.FromVisual(this) is not HwndSource source) return;
+        var caption = ThemeManager.Current.Caption;
+        int background = caption?.Background ?? unchecked((int)0xFFFFFFFF);
+        int text = caption?.Text ?? unchecked((int)0xFFFFFFFF);
+        int border = caption?.Border ?? unchecked((int)0xFFFFFFFF);
+        DwmSetWindowAttribute(source.Handle, DWMWA_CAPTION_COLOR, ref background, sizeof(int));
+        DwmSetWindowAttribute(source.Handle, DWMWA_TEXT_COLOR, ref text, sizeof(int));
+        DwmSetWindowAttribute(source.Handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
     }
 
     private void EnableAcrylic()
@@ -509,5 +543,7 @@ public partial class MainWindow : Window
 
         int backdrop = DWMSBT_ACRYLIC;
         DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+
+        ApplyChrome();
     }
 }

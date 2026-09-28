@@ -178,6 +178,14 @@ public static class TweakService
         },
         new Tweak
         {
+            Name = "Startup app delay",
+            Description = "Removes Explorer's built-in delay before launching startup apps — a leftover from spreading out disk I/O on old HDDs",
+            IsApplied = () => ReadDword(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize", "StartupDelayInMSec") == 0,
+            Apply = () => WriteDword(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize", "StartupDelayInMSec", 0),
+            Revert = () => DeleteValue(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize", "StartupDelayInMSec"),
+        },
+        new Tweak
+        {
             Name = "Windows Recall",
             Description = "Disables Recall's continuous screen snapshotting (Copilot+ PCs)",
             IsApplied = () => ReadDword(Registry.LocalMachine, @"SOFTWARE\Policies\Microsoft\Windows\WindowsAI", "DisableAIDataAnalysis") == 1,
