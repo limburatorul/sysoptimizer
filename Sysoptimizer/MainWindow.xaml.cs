@@ -74,6 +74,7 @@ public partial class MainWindow : Window
         ApplyRoundedClip(CpuCardBorder);
         ApplyRoundedClip(MemCardBorder);
         ApplyRoundedClip(GpuCardBorder);
+        CpuThreadsGrid.SizeChanged += (_, e) => { if (e.WidthChanged) LayoutCpuThreads(); };
 
         StartResourceMonitor();
 
@@ -272,8 +273,25 @@ public partial class MainWindow : Window
         var cell = new System.Windows.Controls.Border { Child = content, Height = 76, Margin = new Thickness(3), BorderThickness = new Thickness(1), ClipToBounds = true };
         cell.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Border");
         CpuThreadsGrid.Children.Add(cell);
-        CpuThreadsGrid.Columns = Math.Min(6, CpuThreadsGrid.Children.Count);
+        LayoutCpuThreads();
         _liveGraphs.Add(new GraphBinding { Container = graph, Line = line, Fill = fill, History = history, AutoScale = false });
+    }
+
+    private void LayoutCpuThreads() =>
+        CpuThreadsGrid.Columns = ThreadColumns(CpuThreadsGrid.Children.Count, (int)(CpuThreadsGrid.ActualWidth / 150));
+
+    /// <summary>
+    /// As many ~150px cells per row as fit, but only a count that divides the threads evenly, so every row
+    /// is full (8 → 4×2, not 6+2). When nothing divides well (a prime count), balance the rows instead.
+    /// </summary>
+    internal static int ThreadColumns(int threads, int fit)
+    {
+        if (threads <= 0) return 1;
+        int maxCols = Math.Clamp(fit, 1, threads);
+        int cols = Enumerable.Range(1, maxCols).Last(c => threads % c == 0);
+        if (cols * 2 > maxCols) return cols;
+        int rows = (threads + maxCols - 1) / maxCols;
+        return (threads + rows - 1) / rows;
     }
 
     private void CpuPerThread_Changed(object sender, RoutedEventArgs e)
