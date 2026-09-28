@@ -55,6 +55,9 @@
                                             <TextBlock Text="CPU" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                             <TextBlock x:Name="CpuPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
                                         </StackPanel>
+                                        <CheckBox x:Name="CpuPerThreadCheck" Content="Per thread" Style="{StaticResource PillToggle}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,14,0"
+                                                  Checked="CpuPerThread_Changed" Unchecked="CpuPerThread_Changed" />
+                                        <UniformGrid x:Name="CpuThreadsGrid" Visibility="Collapsed" Margin="11,56,11,11" />
                                     </Grid>
                                 </Border>
                                 <Border x:Name="MemCardBorder" Height="150" Margin="0,0,0,10" Padding="0,14,0,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">

@@ -22,6 +22,7 @@ public class ResourceMonitor : IDisposable
 
     private readonly Pdh.Query _query = new();
     private readonly int _cpuCounter;
+    private readonly List<int> _cpuThreadCounters = new();
     private readonly List<(string name, int active, int read, int write, int latency)> _diskCounters = new();
     private readonly List<int> _gpuUtilCounters = new();
     private readonly List<int> _gpuMemCounters = new();
@@ -34,6 +35,12 @@ public class ResourceMonitor : IDisposable
     public ResourceMonitor()
     {
         _cpuCounter = _query.AddCounter(@"\Processor(_Total)\% Processor Time");
+        // ponytail: Processor(N) numbers only the first 64 logical processors; switch to Processor Information(group,N) if a >64-thread machine ever matters.
+        for (int i = 0; i < Environment.ProcessorCount; i++)
+        {
+            int counter = _query.AddCounter($@"\Processor({i})\% Processor Time");
+            if (counter >= 0) _cpuThreadCounters.Add(counter);
+        }
 
         foreach (var instance in Pdh.EnumInstances("PhysicalDisk"))
         {
@@ -80,7 +87,11 @@ public class ResourceMonitor : IDisposable
     {
         RefreshGpuCounters();
         _query.Collect();
-        var snap = new ResourceSnapshot { CpuPercent = _query.Read(_cpuCounter) };
+        var snap = new ResourceSnapshot
+        {
+            CpuPercent = _query.Read(_cpuCounter),
+            CpuThreads = _cpuThreadCounters.Select(c => Math.Min(100, _query.Read(c))).ToList(),
+        };
 
         var mem = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
         if (GlobalMemoryStatusEx(ref mem))

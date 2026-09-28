@@ -6,14 +6,14 @@
          active Themes/*.xaml through DynamicResource, so switching theme repaints without a restart. -->
 
     <!-- Duration / theme pills -->
-    <Style x:Key="PillToggle" TargetType="RadioButton">
+    <Style x:Key="PillToggle" TargetType="ToggleButton">
         <Setter Property="Foreground" Value="{DynamicResource PillForeground}" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Padding" Value="12,4" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="RadioButton">
+                <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="Bd" Background="{DynamicResource PillBackground}" BorderBrush="{DynamicResource Border}"
                             BorderThickness="1" CornerRadius="{DynamicResource PillRadius}" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center">

@@ -38,6 +38,8 @@ public partial class MainWindow : Window
     private readonly Queue<(DateTime Time, double Value)> _cpuHistory = new();
     private readonly Queue<(DateTime Time, double Value)> _memHistory = new();
     private readonly Queue<(DateTime Time, double Value)> _gpuHistory = new();
+    private readonly List<Queue<(DateTime Time, double Value)>> _cpuThreadHistory = new();
+    private readonly List<System.Windows.Controls.TextBlock> _cpuThreadTexts = new();
     private int _historyWindowSeconds = 60;
     private const int MaxHistorySeconds = 300;
 
@@ -209,6 +211,12 @@ public partial class MainWindow : Window
 
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
         PushHistory(_cpuHistory, snap.CpuPercent);
+        for (int i = 0; i < snap.CpuThreads.Count; i++)
+        {
+            if (i == _cpuThreadHistory.Count) AddCpuThreadGraph();
+            PushHistory(_cpuThreadHistory[i], snap.CpuThreads[i]);
+            _cpuThreadTexts[i].Text = $"{snap.CpuThreads[i]:0}%";
+        }
 
         MemPercentText.Text = $"{snap.MemPercent:0}%";
         MemDetailText.Text = $"{snap.MemUsedGB:0.#} / {snap.MemTotalGB:0.#} GB";
@@ -238,6 +246,42 @@ public partial class MainWindow : Window
             PushHistory(card.SpeedHistory, n.DownMbps + n.UpMbps);
             if (n.LatencyAvailable) PushHistory(card.LatencyHistory, n.LatencyMs);
         }
+    }
+
+    // Always sampled, so ticking "Per thread" shows the full history straight away. No glow on these:
+    // an Effect per mini graph, re-rendered every frame, costs far more than the curves themselves.
+    private void AddCpuThreadGraph()
+    {
+        var (graph, line, fill) = MetricCard.BuildGraph("AccentCpu", "AreaFillCpu", glowKey: null);
+        graph.Margin = new Thickness(0, 20, 0, 0); // below the header, so the curve never runs through the text
+        var history = new Queue<(DateTime Time, double Value)>();
+        _cpuThreadHistory.Add(history);
+
+        var name = new System.Windows.Controls.TextBlock { Text = $"CPU {_cpuThreadHistory.Count - 1}", FontSize = 10 };
+        name.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "TextSecondary");
+        var value = new System.Windows.Controls.TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold };
+        _cpuThreadTexts.Add(value);
+        var header = new System.Windows.Controls.DockPanel { Margin = new Thickness(6, 3, 6, 0), VerticalAlignment = VerticalAlignment.Top };
+        System.Windows.Controls.DockPanel.SetDock(value, System.Windows.Controls.Dock.Right);
+        header.Children.Add(value);
+        header.Children.Add(name);
+
+        var content = new System.Windows.Controls.Grid();
+        content.Children.Add(graph);
+        content.Children.Add(header);
+        var cell = new System.Windows.Controls.Border { Child = content, Height = 76, Margin = new Thickness(3), BorderThickness = new Thickness(1), ClipToBounds = true };
+        cell.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Border");
+        CpuThreadsGrid.Children.Add(cell);
+        CpuThreadsGrid.Columns = Math.Min(6, CpuThreadsGrid.Children.Count);
+        _liveGraphs.Add(new GraphBinding { Container = graph, Line = line, Fill = fill, History = history, AutoScale = false });
+    }
+
+    private void CpuPerThread_Changed(object sender, RoutedEventArgs e)
+    {
+        bool perThread = CpuPerThreadCheck.IsChecked == true;
+        CpuThreadsGrid.Visibility = perThread ? Visibility.Visible : Visibility.Collapsed;
+        CpuSparkline.Visibility = CpuAreaFill.Visibility = perThread ? Visibility.Collapsed : Visibility.Visible;
+        CpuCardBorder.Height = perThread ? double.NaN : 150;
     }
 
     /// <summary>Disks and network adapters are discovered at runtime, so their cards are built lazily on first sight.</summary>

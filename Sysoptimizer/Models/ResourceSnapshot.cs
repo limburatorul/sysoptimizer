@@ -22,6 +22,7 @@ public class NetSnapshot
 public class ResourceSnapshot
 {
     public double CpuPercent { get; set; }
+    public List<double> CpuThreads { get; set; } = new();
     public double MemUsedGB { get; set; }
     public double MemTotalGB { get; set; }
     public double MemPercent { get; set; }

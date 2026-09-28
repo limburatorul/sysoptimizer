@@ -79,10 +79,10 @@ public class MetricCard
     private static Border WrapGraph(Grid graph, double height) =>
         new() { Child = graph, Height = height, Margin = new Thickness(0, 4, 0, 0), ClipToBounds = true };
 
-    private static (Grid graph, Path line, Path fill) BuildGraph()
+    public static (Grid graph, Path line, Path fill) BuildGraph(string accentKey = "Accent", string fillKey = "AreaFill", string? glowKey = "LineGlow")
     {
         var fill = new Path { Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
-        fill.SetResourceReference(Shape.FillProperty, "AreaFill");
+        fill.SetResourceReference(Shape.FillProperty, fillKey);
         var line = new Path
         {
             StrokeLineJoin = PenLineJoin.Round,
@@ -92,9 +92,9 @@ public class MetricCard
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
         };
-        line.SetResourceReference(Shape.StrokeProperty, "Accent");
+        line.SetResourceReference(Shape.StrokeProperty, accentKey);
         line.SetResourceReference(Shape.StrokeThicknessProperty, "GraphStroke");
-        line.SetResourceReference(UIElement.EffectProperty, "LineGlow");
+        if (glowKey != null) line.SetResourceReference(UIElement.EffectProperty, glowKey);
         var graph = new Grid();
         graph.Children.Add(fill);
         graph.Children.Add(line);
