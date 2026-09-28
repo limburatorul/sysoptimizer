@@ -86,7 +86,7 @@ public partial class MainWindow : Window
             _cleanupItems.Add(new OptionItem { Name = t.Name, Description = t.Description, Tag = t.Path });
 
         foreach (var s in ServiceManager.KnownServices)
-            _serviceItems.Add(new OptionItem { Name = s.Name, Description = s.Description, Note = ServiceManager.GetStatus(s.Key), Tag = s.Key });
+            _serviceItems.Add(new OptionItem { Name = s.Name, Description = s.Description, Note = "Checking...", Tag = s.Key });
 
         foreach (var t in _tweaks)
             _tweakItems.Add(new OptionItem { Name = t.Name, Description = t.Description, Note = t.IsApplied() ? "Applied" : "", Tag = t });
@@ -98,7 +98,7 @@ public partial class MainWindow : Window
             _startupItems.Add(new OptionItem { Name = item.Name, Description = item.Command, Note = item.Location == "Disabled" ? "Disabled" : "Enabled", Tag = item });
 
         foreach (var (name, package) in BloatwareService.KnownBloat)
-            _bloatwareItems.Add(new OptionItem { Name = name, Note = BloatwareService.IsInstalled(package) ? "" : "Not installed", Tag = package });
+            _bloatwareItems.Add(new OptionItem { Name = name, Note = "Checking...", Tag = package });
 
         DuplicatesList.ItemsSource = _duplicateGroups;
         LargeFilesList.ItemsSource = _largeFileItems;
@@ -108,17 +108,35 @@ public partial class MainWindow : Window
         foreach (var app in UninstallService.GetInstalledApps())
             _installedAppItems.Add(new OptionItem { Name = app.Name, Description = $"{app.Publisher} {app.Version}".Trim(), Tag = app });
 
-        RefreshHealth();
-
         DnsAdapterCombo.ItemsSource = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
                      && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
             .Select(n => n.Name).ToList();
         if (DnsAdapterCombo.Items.Count > 0) DnsAdapterCombo.SelectedIndex = 0;
 
-        Log("Ready. " + (WingetService.IsWingetAvailable() ? "winget detected." : "winget is missing — install App Installer from the Microsoft Store."));
-
+        Loaded += async (_, _) => await LoadStatusesAsync();
         StartUpdateChecks();
+    }
+
+    // Everything here launches external processes (sc, powershell, winget) — run after the window
+    // is on screen, in parallel, so a slow machine sees the app at once and the notes fill in.
+    private async Task LoadStatusesAsync()
+    {
+        var services = Task.Run(() => _serviceItems.Select(i => ServiceManager.GetStatus((string)i.Tag!)).ToList());
+        var bloat = Task.Run(BloatwareService.GetInstalledPackages);
+        var winget = Task.Run(WingetService.IsWingetAvailable);
+        var health = RefreshHealth();
+
+        var statuses = await services;
+        for (int i = 0; i < statuses.Count; i++) _serviceItems[i].Note = statuses[i];
+        ServicesList.Items.Refresh();
+
+        var installed = await bloat;
+        foreach (var item in _bloatwareItems) item.Note = installed.Contains((string)item.Tag!) ? "" : "Not installed";
+        BloatwareList.Items.Refresh();
+
+        Log("Ready. " + (await winget ? "winget detected." : "winget is missing — install App Installer from the Microsoft Store."));
+        await health;
     }
 
     private void Link_Navigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
@@ -246,7 +264,7 @@ public partial class MainWindow : Window
     {
         var now = DateTime.UtcNow;
         history.Enqueue((now, value));
-        while (history.Count > 0 && (now - history.Peek().Time).TotalSeconds > MaxHistorySeconds) history.Dequeue();
+        while (history.Count > 0 && (now - history.Peek().Time).TotalSeconds > MaxHistorySeconds + 5) history.Dequeue(); // +5: the 5m view still needs its off-screen sample
     }
 
     /// <summary>
@@ -281,8 +299,12 @@ public partial class MainWindow : Window
         double height = container.ActualHeight > 0 ? container.ActualHeight : 122;
 
         var windowStart = now.AddSeconds(-_historyWindowSeconds);
-        var points = history.Where(s => s.Time >= windowStart).ToList();
-        if (points.Count == 0) { line.Data = null; fill.Data = null; return; }
+        // Keep one sample past the left edge so the oldest segment slides out under the card's clip
+        // instead of vanishing the moment its start point crosses x=0.
+        var points = history.ToList();
+        int first = points.FindIndex(s => s.Time >= windowStart);
+        if (first < 0) { line.Data = null; fill.Data = null; return; }
+        points.RemoveRange(0, Math.Max(0, first - 1));
 
         // Ease the newest value in instead of snapping to it the instant a sample lands — a fresh sample
         // is otherwise a hard vertex appearing mid-frame, which reads as a jump right where the eye is.
@@ -530,10 +552,15 @@ public partial class MainWindow : Window
 
     // --- Health ---
 
-    private void RefreshHealth()
+    private async Task RefreshHealth()
     {
-        var report = HealthService.Check();
+        var report = await Task.Run(HealthService.Check);
         HealthScoreText.Text = $"{report.Score}";
+        var color = report.Score >= 75 ? Color.FromRgb(0x22, 0xC5, 0x5E)
+                  : report.Score >= 35 ? Color.FromRgb(0xF9, 0x73, 0x16)
+                  : Color.FromRgb(0xEF, 0x44, 0x44);
+        HealthScoreText.Foreground = new SolidColorBrush(color);
+        HealthCardBorder.BorderBrush = new SolidColorBrush(color);
         HealthIssuesList.ItemsSource = report.Issues;
     }
 
@@ -548,7 +575,7 @@ public partial class MainWindow : Window
         foreach (var item in _serviceItems) item.Note = ServiceManager.GetStatus((string)item.Tag!);
         CleanupList.Items.Refresh();
         ServicesList.Items.Refresh();
-        RefreshHealth();
+        await RefreshHealth();
         OptimizeNowButton.IsEnabled = true;
         Log("Optimize complete.");
     }

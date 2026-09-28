@@ -32,10 +32,11 @@ public static class BloatwareService
         ("Cortana", "Microsoft.549981C3F5F10"),
     };
 
-    public static bool IsInstalled(string packageName)
+    /// <summary>One PowerShell launch for the whole list — a launch per package took tens of seconds on slow machines.</summary>
+    public static HashSet<string> GetInstalledPackages()
     {
-        var (ok, output) = RunPowerShell($"Get-AppxPackage -Name {packageName} | Select-Object -First 1 Name");
-        return ok && output.Contains(packageName, StringComparison.OrdinalIgnoreCase);
+        var (_, output) = RunPowerShell("Get-AppxPackage | Select-Object -ExpandProperty Name");
+        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public static bool Remove(string packageName, out string message)
