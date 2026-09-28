@@ -300,6 +300,7 @@
                         Feedback: <Hyperlink NavigateUri="mailto:feedback@protagonistlabs.app?subject=Sysoptimizer%20feedback" RequestNavigate="Link_Navigate">feedback@protagonistlabs.app</Hyperlink>
                         · <Hyperlink NavigateUri="https://protagonistlabs.app/sysoptimizer/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=footer" RequestNavigate="Link_Navigate">Website</Hyperlink>
                         · <Hyperlink NavigateUri="https://protagonistlabs.app/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=more-apps" RequestNavigate="Link_Navigate">More apps from Protagonist Labs</Hyperlink>
+                        · <Hyperlink x:Name="CheckUpdatesLink" Click="CheckUpdatesLink_Click">Check for updates</Hyperlink>
                     </TextBlock>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Log" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />

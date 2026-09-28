@@ -23,6 +23,8 @@ public partial class MainWindow : Window
 
     private ResourceMonitor? _resourceMonitor;
     private DispatcherTimer? _resourceTimer;
+    private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromMinutes(10) };
+    private UpdateDialog? _updateDialog;
     private readonly Queue<(DateTime Time, double Value)> _cpuHistory = new();
     private readonly Queue<(DateTime Time, double Value)> _memHistory = new();
     private readonly Queue<(DateTime Time, double Value)> _gpuHistory = new();
@@ -47,8 +49,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        SourceInitialized += (_, _) => EnableAcrylic();
-        Closed += (_, _) => { _resourceTimer?.Stop(); _resourceMonitor?.Dispose(); CompositionTarget.Rendering -= OnRendering; ThemeManager.ThemeChanged -= OnThemeChanged; };
+        SourceInitialized += (_, _) => WindowGlass.EnableAcrylic(this);
+        Closed += (_, _) => { _resourceTimer?.Stop(); _resourceMonitor?.Dispose(); CompositionTarget.Rendering -= OnRendering; ThemeManager.ThemeChanged -= OnThemeChanged; _updateTimer.Stop(); };
         ThemeManager.ThemeChanged += OnThemeChanged;
         (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, _ => ThemeGlass }).IsChecked = true;
 
@@ -95,12 +97,56 @@ public partial class MainWindow : Window
         if (DnsAdapterCombo.Items.Count > 0) DnsAdapterCombo.SelectedIndex = 0;
 
         Log("Ready. " + (WingetService.IsWingetAvailable() ? "winget detected." : "winget is missing — install App Installer from the Microsoft Store."));
+
+        StartUpdateChecks();
     }
 
     private void Link_Navigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
     {
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
         e.Handled = true;
+    }
+
+    // --- Updates ---
+
+    private void StartUpdateChecks()
+    {
+        var first = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        first.Tick += async (_, _) => { first.Stop(); await CheckForUpdate(manual: false); };
+        first.Start();
+        _updateTimer.Tick += async (_, _) => await CheckForUpdate(manual: false);
+        _updateTimer.Start();
+    }
+
+    /// <returns>What to tell the user (only used by the manual "Check for updates" link).</returns>
+    private async Task<string?> CheckForUpdate(bool manual)
+    {
+        if (_updateDialog != null) { _updateDialog.Activate(); return null; }
+        var release = await Updater.Check(manual);
+        if (release == null) return manual ? $"Sysoptimizer {Updater.Current} is the latest version." : null;
+
+        _updateDialog = new UpdateDialog(this, release);
+        _updateDialog.Closed += (_, _) => { Updater.Dismiss(release); _updateDialog = null; };
+        _updateDialog.Show();
+        Log($"Update available: Sysoptimizer {release.Version}.");
+        return null;
+    }
+
+    // The same check the timer runs, on demand. A new version opens the update dialog; otherwise the
+    // answer ("… is the latest version") replaces the link's own text, so nothing pops up for nothing.
+    private async void CheckUpdatesLink_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdatesLink.IsEnabled = false;
+        SetLinkText(CheckUpdatesLink, "Checking...");
+        var answer = await CheckForUpdate(manual: true);
+        CheckUpdatesLink.IsEnabled = true;
+        SetLinkText(CheckUpdatesLink, answer ?? "Check for updates");
+    }
+
+    private static void SetLinkText(System.Windows.Documents.Hyperlink link, string text)
+    {
+        link.Inlines.Clear();
+        link.Inlines.Add(new System.Windows.Documents.Run(text));
     }
 
     private void Log(string message) => LogText.Text += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
@@ -462,24 +508,6 @@ public partial class MainWindow : Window
     private static string FirstLine(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "unknown error";
 
-    // --- Sticlă DWM — vezi vault Branding/Aplicatii, secțiunea WPF ---
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Margins { public int Left, Right, Top, Bottom; }
-
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
-    private const int DWMWA_BORDER_COLOR = 34;
-    private const int DWMWA_CAPTION_COLOR = 35;
-    private const int DWMWA_TEXT_COLOR = 36;
-    private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
-    private const int DWMSBT_ACRYLIC = 3;
-
     /// <summary>
     /// Border.ClipToBounds clips children to the rectangular layout box, not the rounded silhouette its
     /// CornerRadius actually paints — a full-bleed graph behind the card's text otherwise pokes square
@@ -508,42 +536,8 @@ public partial class MainWindow : Window
 
     private void OnThemeChanged()
     {
-        ApplyChrome();
+        WindowGlass.ApplyChrome(this);
         // The corner radius is a resource reference; wait for it to settle before re-cutting the clips.
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => _clipUpdaters.ForEach(update => update()));
-    }
-
-    /// <summary>Title bar colors follow the theme (Windows 11); Glass keeps the system look.</summary>
-    private void ApplyChrome()
-    {
-        if (PresentationSource.FromVisual(this) is not HwndSource source) return;
-        var caption = ThemeManager.Current.Caption;
-        int background = caption?.Background ?? unchecked((int)0xFFFFFFFF);
-        int text = caption?.Text ?? unchecked((int)0xFFFFFFFF);
-        int border = caption?.Border ?? unchecked((int)0xFFFFFFFF);
-        DwmSetWindowAttribute(source.Handle, DWMWA_CAPTION_COLOR, ref background, sizeof(int));
-        DwmSetWindowAttribute(source.Handle, DWMWA_TEXT_COLOR, ref text, sizeof(int));
-        DwmSetWindowAttribute(source.Handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
-    }
-
-    private void EnableAcrylic()
-    {
-        var hwndSource = (HwndSource)PresentationSource.FromVisual(this)!;
-        IntPtr hwnd = hwndSource.Handle;
-
-        // Fundalul de compoziție e negru opac implicit: fără linia asta,
-        // orice pixel cu alfa parțial se compune peste negru înainte să ajungă la DWM.
-        hwndSource.CompositionTarget.BackgroundColor = Colors.Transparent;
-
-        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-        DwmExtendFrameIntoClientArea(hwnd, ref margins);
-
-        int dark = 1;
-        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
-
-        int backdrop = DWMSBT_ACRYLIC;
-        DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
-
-        ApplyChrome();
     }
 }

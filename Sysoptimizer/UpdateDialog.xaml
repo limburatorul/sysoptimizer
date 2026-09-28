@@ -1,0 +1,27 @@
+<Window x:Class="Sysoptimizer.UpdateDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Update" Icon="app.ico" Width="520" Height="440" MinWidth="380" MinHeight="300"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="Transparent"
+        FontFamily="{DynamicResource UiFont}" FontSize="13">
+    <Border Background="{DynamicResource Surface}">
+        <DockPanel Margin="18,16,18,14">
+            <TextBlock x:Name="Heading" DockPanel.Dock="Top" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+            <TextBlock x:Name="Sub" DockPanel.Dock="Top" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,12" TextWrapping="Wrap" />
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                <TextBlock x:Name="Status" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="LaterButton" Content="Later" Padding="14,8" Margin="0,0,8,0" Click="Later_Click" />
+                    <Button x:Name="UpdateButton" Content="Update now" Style="{StaticResource PrimaryButton}" Padding="16,8" Click="Update_Click" />
+                </StackPanel>
+            </DockPanel>
+            <ProgressBar x:Name="Progress" DockPanel.Dock="Bottom" Height="4" Maximum="1" Visibility="Collapsed" Margin="0,10,0,0" />
+
+            <Border Background="{DynamicResource SurfaceElevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}">
+                <TextBox x:Name="Notes" IsReadOnly="True" Background="Transparent" Foreground="{DynamicResource TextPrimary}" BorderThickness="0"
+                         Padding="12" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+            </Border>
+        </DockPanel>
+    </Border>
+</Window>
