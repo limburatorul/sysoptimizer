@@ -372,6 +372,15 @@ public partial class MainWindow : Window
     private void DrawSparkline(GraphBinding g, DateTime now)
     {
         var (container, line, fill, history, autoScale) = (g.Container, g.Line, g.Fill, g.History, g.AutoScale);
+        // "Per thread" hides the main CPU sparkline/fill in favor of the per-core mini graphs, but leaves
+        // CpuGraphGrid itself visible (it also hosts the thread grid) — without this, the hidden card's own
+        // axis gridlines kept repositioning off the height of the ever-growing thread grid beneath them.
+        if (line.Visibility != Visibility.Visible)
+        {
+            if (g.GridLines != null)
+                foreach (var el in g.GridLines.Cast<UIElement>().Concat(g.GridLabels!)) el.Visibility = Visibility.Collapsed;
+            return;
+        }
         double width = container.ActualWidth > 0 ? container.ActualWidth : 220;
         double height = container.ActualHeight > 0 ? container.ActualHeight : 122;
 
@@ -451,6 +460,7 @@ public partial class MainWindow : Window
         for (int i = 0; i < AxisFractions.Length; i++)
         {
             double y = AxisFractions[i] * height;
+            g.GridLines[i].Visibility = g.GridLabels![i].Visibility = Visibility.Visible;
             g.GridLines[i].X1 = 0; g.GridLines[i].X2 = width; g.GridLines[i].Y1 = y; g.GridLines[i].Y2 = y;
             double value = max * (1 - AxisFractions[i]);
             g.GridLabels![i].Text = autoScale ? $"{value:0}" : $"{value:0}%";
