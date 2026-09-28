@@ -1,6 +1,7 @@
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using Microsoft.Win32;
 using Sysoptimizer.Models;
 
 namespace Sysoptimizer.Services;
@@ -22,6 +23,8 @@ public class ResourceMonitor : IDisposable
 
     private readonly Pdh.Query _query = new();
     private readonly int _cpuCounter;
+    private readonly int _cpuFreqCounter;
+    private readonly double _cpuBaseMHz;
     private readonly List<int> _cpuThreadCounters = new();
     private readonly List<(string name, int active, int read, int write, int latency)> _diskCounters = new();
     private readonly List<int> _gpuUtilCounters = new();
@@ -35,6 +38,8 @@ public class ResourceMonitor : IDisposable
     public ResourceMonitor()
     {
         _cpuCounter = _query.AddCounter(@"\Processor(_Total)\% Processor Time");
+        _cpuFreqCounter = _query.AddCounter(@"\Processor Information(_Total)\% Processor Performance");
+        _cpuBaseMHz = ReadBaseClockMHz();
         // ponytail: Processor(N) numbers only the first 64 logical processors; switch to Processor Information(group,N) if a >64-thread machine ever matters.
         for (int i = 0; i < Environment.ProcessorCount; i++)
         {
@@ -83,14 +88,24 @@ public class ResourceMonitor : IDisposable
         }
     }
 
+    /// <summary>Base clock speed in MHz, from the same registry value Task Manager reads (~MHz under the first logical processor's key).</summary>
+    private static double ReadBaseClockMHz()
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+        return key?.GetValue("~MHz") is int mhz ? mhz : 0;
+    }
+
     public ResourceSnapshot Sample()
     {
         RefreshGpuCounters();
         _query.Collect();
+        double perfPercent = _cpuFreqCounter >= 0 ? _query.Read(_cpuFreqCounter) : 100;
         var snap = new ResourceSnapshot
         {
             CpuPercent = _query.Read(_cpuCounter),
             CpuThreads = _cpuThreadCounters.Select(c => Math.Min(100, _query.Read(c))).ToList(),
+            CpuFrequencyGHz = _cpuBaseMHz * perfPercent / 100.0 / 1000.0,
+            UptimeSeconds = Environment.TickCount64 / 1000.0,
         };
 
         var mem = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };

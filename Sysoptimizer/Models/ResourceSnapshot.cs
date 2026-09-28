@@ -23,6 +23,8 @@ public class ResourceSnapshot
 {
     public double CpuPercent { get; set; }
     public List<double> CpuThreads { get; set; } = new();
+    public double CpuFrequencyGHz { get; set; }
+    public double UptimeSeconds { get; set; }
     public double MemUsedGB { get; set; }
     public double MemTotalGB { get; set; }
     public double MemPercent { get; set; }

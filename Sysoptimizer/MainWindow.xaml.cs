@@ -53,8 +53,14 @@ public partial class MainWindow : Window
         public required System.Windows.Shapes.Path Fill;
         public required Queue<(DateTime Time, double Value)> History;
         public required bool AutoScale;
+        public bool ShowAxis = true;
+        public double AxisTopInset; // keeps the top label clear of a top-right control (the CPU card's "Per thread" checkbox)
         public double DisplayValue = double.NaN; // eased towards the latest real sample — see DrawSparkline
+        // Subtle horizontal gridlines with their value to the left, built lazily on first draw — see UpdateAxisGridlines.
+        public System.Windows.Shapes.Line[]? GridLines;
+        public System.Windows.Controls.TextBlock[]? GridLabels;
     }
+    private static readonly double[] AxisFractions = { 0.0, 0.5, 1.0 }; // fraction of card height, top to bottom
     private readonly List<GraphBinding> _liveGraphs = new();
     private DateTime _lastRender = DateTime.MinValue;
 
@@ -66,7 +72,7 @@ public partial class MainWindow : Window
         ThemeManager.ThemeChanged += OnThemeChanged;
         (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, _ => ThemeGlass }).IsChecked = true;
 
-        _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false });
+        _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 22 });
         _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false });
         _liveGraphs.Add(new GraphBinding { Container = GpuGraphGrid, Line = GpuSparkline, Fill = GpuAreaFill, History = _gpuHistory, AutoScale = false });
         CompositionTarget.Rendering += OnRendering;
@@ -192,6 +198,12 @@ public partial class MainWindow : Window
 
     private void Log(string message) => LogText.Text += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
 
+    private static string FormatUptime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return $"{(int)ts.TotalDays}:{ts.Hours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
+    }
+
     // --- Resources ---
 
     private void StartResourceMonitor()
@@ -211,6 +223,9 @@ public partial class MainWindow : Window
         var snap = await Task.Run(() => _resourceMonitor!.Sample());
 
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
+        CpuDetailText.Text = snap.CpuFrequencyGHz > 0
+            ? $"{snap.CpuFrequencyGHz:0.00} GHz · Up {FormatUptime(snap.UptimeSeconds)}"
+            : $"Up {FormatUptime(snap.UptimeSeconds)}";
         PushHistory(_cpuHistory, snap.CpuPercent);
         for (int i = 0; i < snap.CpuThreads.Count; i++)
         {
@@ -274,7 +289,7 @@ public partial class MainWindow : Window
         cell.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Border");
         CpuThreadsGrid.Children.Add(cell);
         LayoutCpuThreads();
-        _liveGraphs.Add(new GraphBinding { Container = graph, Line = line, Fill = fill, History = history, AutoScale = false });
+        _liveGraphs.Add(new GraphBinding { Container = graph, Line = line, Fill = fill, History = history, AutoScale = false, ShowAxis = false });
     }
 
     private void LayoutCpuThreads() =>
@@ -382,6 +397,7 @@ public partial class MainWindow : Window
         // CPU/Memory/GPU are already 0-100%; disk/network metrics (MB/s, Mbps, ms) have no fixed
         // ceiling, so scale those to the window's own peak instead of clamping to a percentage.
         double max = autoScale ? Math.Max(1, points.Max(p => p.Value)) : 100;
+        if (g.ShowAxis) UpdateAxisGridlines(g, width, height, max, autoScale, g.AxisTopInset);
         double XOf(DateTime t) => width * (1 - (now - t).TotalSeconds / _historyWindowSeconds);
         double YOf(double v) => height - Math.Clamp(v, 0, max) / max * height;
 
@@ -409,6 +425,37 @@ public partial class MainWindow : Window
         var areaGeometry = new PathGeometry();
         areaGeometry.Figures.Add(areaFigure);
         fill.Data = areaGeometry;
+    }
+
+    /// <summary>Three subtle horizontal lines with their value to the right, like Task Manager's graph scale — built once per card, repositioned every frame since autoscaled cards (disk/network) change their max as new peaks come in.</summary>
+    private static void UpdateAxisGridlines(GraphBinding g, double width, double height, double max, bool autoScale, double topInset)
+    {
+        if (g.GridLines == null)
+        {
+            var panel = (System.Windows.Controls.Panel)g.Container;
+            g.GridLines = new System.Windows.Shapes.Line[AxisFractions.Length];
+            g.GridLabels = new System.Windows.Controls.TextBlock[AxisFractions.Length];
+            for (int i = 0; i < AxisFractions.Length; i++)
+            {
+                var gridLine = new System.Windows.Shapes.Line { StrokeThickness = 1, Opacity = 0.2 };
+                gridLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
+                var label = new System.Windows.Controls.TextBlock { FontSize = 9, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
+                label.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "TextSecondary");
+                panel.Children.Insert(0, gridLine); // behind the fill/line, drawn first
+                panel.Children.Insert(1, label);
+                g.GridLines[i] = gridLine;
+                g.GridLabels[i] = label;
+            }
+        }
+
+        for (int i = 0; i < AxisFractions.Length; i++)
+        {
+            double y = AxisFractions[i] * height;
+            g.GridLines[i].X1 = 0; g.GridLines[i].X2 = width; g.GridLines[i].Y1 = y; g.GridLines[i].Y2 = y;
+            double value = max * (1 - AxisFractions[i]);
+            g.GridLabels![i].Text = autoScale ? $"{value:0}" : $"{value:0}%";
+            g.GridLabels[i].Margin = new Thickness(0, Math.Clamp(y - 7, topInset, height - 14), 8, 0);
+        }
     }
 
     // --- Curățare ---
