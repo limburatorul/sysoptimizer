@@ -32,3 +32,9 @@ dotnet publish Sysoptimizer -c Release -r win-x64 --self-contained true -p:Publi
 ## Licence
 
 MIT. Made by [Protagonist Labs](https://protagonistlabs.app/sysoptimizer/).
+
+## More from Protagonist Labs
+
+- [SpaceScan](https://protagonistlabs.app/spacescan/?utm_source=github&utm_medium=readme&utm_campaign=sysoptimizer): shows what takes the space on a drive, free.
+- [Backup Labs](https://protagonistlabs.app/backuplabs/?utm_source=github&utm_medium=readme&utm_campaign=sysoptimizer): scheduled, versioned folder backups, free.
+- [All apps](https://protagonistlabs.app/?utm_source=github&utm_medium=readme&utm_campaign=sysoptimizer): Windows apps that each do one job properly.
