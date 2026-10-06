@@ -85,6 +85,8 @@
                                             <TextBlock x:Name="MemPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
                                             <TextBlock x:Name="MemDetailText" Text="0 / 0 GB" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
+                                        <Button Content="Free memory" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,14,0" Padding="10,3" FontSize="11" Click="TrimMemory_Click"
+                                                ToolTip="Trims every process's working set: its pages move to standby or the pagefile, and free RAM rises right away. Apps read back what they use next, so they can feel slower for a moment. It doesn't make Windows faster in general." />
                                     </Grid>
                                 </Border>
                                 <Border x:Name="GpuCardBorder" Height="150" Padding="0,14,0,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
@@ -170,7 +172,9 @@
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton x:Name="HistoryRange1h" Content="1h" GroupName="HistoryRange" Tag="1" Style="{StaticResource PillToggle}" IsChecked="True" Checked="HistoryRange_Checked" />
-                                <RadioButton Content="6h" GroupName="HistoryRange" Tag="6" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
+                                <RadioButton Content="2h" GroupName="HistoryRange" Tag="2" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
+                                <RadioButton Content="3h" GroupName="HistoryRange" Tag="3" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
+                                <RadioButton Content="5h" GroupName="HistoryRange" Tag="5" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
                                 <RadioButton Content="24h" GroupName="HistoryRange" Tag="24" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
                                 <RadioButton Content="3d" GroupName="HistoryRange" Tag="72" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
                                 <RadioButton Content="7d" GroupName="HistoryRange" Tag="168" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
@@ -191,7 +195,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <DockPanel>
-                                <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover the chart to see what was running · click to zoom in" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch to zoom into it" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextTrimming="CharacterEllipsis" />
                                 <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                     <ItemsControl x:Name="HistoryCursorList" ItemTemplate="{StaticResource HistoryRowTemplate}" />
                                 </ScrollViewer>
@@ -205,10 +209,13 @@
                         </Grid>
                         <DockPanel DockPanel.Dock="Bottom" Height="46" Margin="0,8,0,0">
                             <ComboBox x:Name="NavigatorSpanCombo" DockPanel.Dock="Left" Width="110" VerticalAlignment="Center" SelectionChanged="NavigatorSpan_Changed" AutomationProperties.Name="Overview span">
-                                <ComboBoxItem Content="1 day" Tag="1" />
-                                <ComboBoxItem Content="3 days" Tag="3" IsSelected="True" />
-                                <ComboBoxItem Content="7 days" Tag="7" />
-                                <ComboBoxItem Content="30 days" Tag="30" />
+                                <ComboBoxItem Content="1 hour" Tag="1" />
+                                <ComboBoxItem Content="2 hours" Tag="2" />
+                                <ComboBoxItem Content="3 hours" Tag="3" />
+                                <ComboBoxItem Content="1 day" Tag="24" IsSelected="True" />
+                                <ComboBoxItem Content="3 days" Tag="72" />
+                                <ComboBoxItem Content="7 days" Tag="168" />
+                                <ComboBoxItem Content="30 days" Tag="720" />
                                 <ComboBoxItem Content="Everything" Tag="0" />
                             </ComboBox>
                             <ComboBox x:Name="RetentionCombo" DockPanel.Dock="Right" Width="190" VerticalAlignment="Center" SelectionChanged="Retention_Changed" AutomationProperties.Name="Keep history for"
@@ -227,8 +234,8 @@
                         <Border CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                             <Grid>
                                 <Canvas x:Name="HistoryChart" Background="Transparent" Cursor="Cross"
-                                        MouseMove="HistoryChart_MouseMove" MouseLeave="HistoryChart_MouseLeave" MouseLeftButtonUp="HistoryChart_Click" />
-                                <TextBlock x:Name="HistoryRangeText" Margin="12,8,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Foreground="{DynamicResource TextSecondary}" FontSize="11" IsHitTestVisible="False" />
+                                        MouseMove="HistoryChart_MouseMove" MouseLeave="HistoryChart_MouseLeave" MouseLeftButtonDown="HistoryChart_MouseDown" MouseLeftButtonUp="HistoryChart_MouseUp" />
+                                <TextBlock x:Name="HistoryRangeText" Margin="12,0,0,56" HorizontalAlignment="Left" VerticalAlignment="Bottom" Foreground="{DynamicResource TextSecondary}" FontSize="11" IsHitTestVisible="False" />
                             </Grid>
                         </Border>
                     </DockPanel>
@@ -272,130 +279,292 @@
                     </DockPanel>
                 </TabItem>
 
-                <TabItem Header="Cleanup">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Analyze" Click="AnalyzeCleanup_Click" Margin="0,0,8,0" />
-                            <Button Content="Clean selected" Style="{StaticResource PrimaryButton}" Click="Clean_Click" />
+                <TabItem Header="Optimize">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
+                            <RadioButton Content="Cleanup" GroupName="OptimizePages" Tag="{Binding ElementName=CleanupPage}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" />
+                            <RadioButton Content="Tweaks" GroupName="OptimizePages" Tag="{Binding ElementName=TweaksPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
+                            <RadioButton Content="Debloat" GroupName="OptimizePages" Tag="{Binding ElementName=DebloatPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
+                            <RadioButton Content="Uninstall" GroupName="OptimizePages" Tag="{Binding ElementName=UninstallPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                         </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="CleanupList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}"
-                                                           VerticalAlignment="Top" Typography.NumeralAlignment="Tabular" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                        <Grid>
+                            <Border x:Name="CleanupPage">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Analyze" Click="AnalyzeCleanup_Click" Margin="0,0,8,0" />
+                                        <Button Content="Clean selected" Style="{StaticResource PrimaryButton}" Click="Clean_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="CleanupList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}"
+                                                                       VerticalAlignment="Top" Typography.NumeralAlignment="Tabular" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="TweaksPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Create restore point" Click="CreateRestorePoint_Click" Margin="0,0,8,0" />
+                                        <Button Content="Restart Explorer" Click="RestartExplorer_Click" Margin="0,0,16,0" />
+                                        <Button Content="Export..." Click="ExportTweaks_Click" Margin="0,0,8,0" />
+                                        <Button Content="Import..." Click="ImportTweaks_Click" Margin="0,0,16,0" />
+                                        <Button Content="Revert selected" Click="RevertTweaks_Click" Margin="0,0,8,0" />
+                                        <Button Content="Apply selected" Style="{StaticResource PrimaryButton}" Click="ApplyTweaks_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="TweaksList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource Accent}" VerticalAlignment="Top" FontSize="11" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="DebloatPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Remove selected" Style="{StaticResource PrimaryButton}" Click="RemoveBloatware_Click" />
+                                    </StackPanel>
+                                    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                               Text="Pre-installed apps most people never open. Removing one affects this PC only; most can be reinstalled from the Microsoft Store." />
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="BloatwareList">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}"
+                                                            Padding="10" Margin="0,0,10,10" Width="220">
+                                                        <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" FontSize="10" />
+                                                            </StackPanel>
+                                                        </CheckBox>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="UninstallPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                                        <ItemsControl x:Name="LeftoversList" Margin="0,0,0,8">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,6">
+                                                        <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" />
+                                                                <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                            </StackPanel>
+                                                        </CheckBox>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button x:Name="DeleteLeftoversButton" Content="Delete leftover folders" Click="DeleteLeftovers_Click" Margin="0,0,8,0" Visibility="Collapsed" />
+                                            <Button Content="Uninstall selected" Style="{StaticResource PrimaryButton}" Click="UninstallApps_Click" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="InstalledAppsList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
                     </DockPanel>
                 </TabItem>
 
-                <TabItem Header="Memory">
-                    <StackPanel Margin="16" VerticalAlignment="Top">
-                        <TextBlock Text="Free up memory" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
-                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,16"
-                                   Text="Trims every process's working set: its pages move to standby or the pagefile, and free RAM rises right away. Apps read back what they use next, so they can feel slower for a moment. It doesn't make Windows faster in general." />
-                        <Button Content="Free memory now" Style="{StaticResource PrimaryButton}"
-                                HorizontalAlignment="Left" Click="TrimMemory_Click" />
-                    </StackPanel>
-                </TabItem>
-
-                <TabItem Header="Services">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Re-enable selected" Click="EnableServices_Click" Margin="0,0,8,0" />
-                            <Button Content="Stop and disable selected" Style="{StaticResource PrimaryButton}" Click="DisableServices_Click" />
+                <TabItem Header="Files">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
+                            <RadioButton Content="Duplicates" GroupName="FilesPages" Tag="{Binding ElementName=DuplicatesPage}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" />
+                            <RadioButton Content="Large files" GroupName="FilesPages" Tag="{Binding ElementName=LargeFilesPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                         </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="ServicesList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                        <Grid>
+                            <Border x:Name="DuplicatesPage">
+                                <DockPanel Margin="16">
+                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                        <Button DockPanel.Dock="Right" Content="Scan" Click="ScanDuplicates_Click" Margin="8,0,0,0" />
+                                        <TextBox x:Name="DuplicatesFolderBox" DockPanel.Dock="Right" Width="260" Margin="8,0,0,0" VerticalContentAlignment="Center" />
+                                        <Button Content="Browse..." Click="BrowseDuplicatesFolder_Click" HorizontalAlignment="Left" />
+                                    </DockPanel>
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Delete selected" Style="{StaticResource PrimaryButton}" Click="DeleteDuplicates_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="DuplicatesList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Header}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                                            <ItemsControl ItemsSource="{Binding Files}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <DockPanel Margin="0,2">
+                                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                                <TextBlock Text="{Binding Description}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                                            </CheckBox>
+                                                                        </DockPanel>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="LargeFilesPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                        <Button DockPanel.Dock="Right" Content="Scan" Click="ScanLargeFiles_Click" Margin="8,0,0,0" />
+                                        <TextBox x:Name="LargeFilesFolderBox" DockPanel.Dock="Right" Width="260" Margin="8,0,0,0" VerticalContentAlignment="Center" />
+                                        <Button Content="Browse..." Click="BrowseLargeFilesFolder_Click" HorizontalAlignment="Left" />
+                                    </DockPanel>
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Delete selected" Style="{StaticResource PrimaryButton}" Click="DeleteLargeFiles_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="LargeFilesList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" Typography.NumeralAlignment="Tabular" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
                     </DockPanel>
                 </TabItem>
 
                 <TabItem Header="Startup">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Enable selected" Click="EnableStartup_Click" Margin="0,0,8,0" />
-                            <Button Content="Disable selected" Style="{StaticResource PrimaryButton}" Click="DisableStartup_Click" />
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
+                            <RadioButton Content="Startup apps" GroupName="StartupPages" Tag="{Binding ElementName=StartupPage}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" />
+                            <RadioButton Content="Services" GroupName="StartupPages" Tag="{Binding ElementName=ServicesPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                         </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="StartupList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Tweaks">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Create restore point" Click="CreateRestorePoint_Click" Margin="0,0,8,0" />
-                            <Button Content="Restart Explorer" Click="RestartExplorer_Click" Margin="0,0,16,0" />
-                            <Button Content="Export..." Click="ExportTweaks_Click" Margin="0,0,8,0" />
-                            <Button Content="Import..." Click="ImportTweaks_Click" Margin="0,0,16,0" />
-                            <Button Content="Revert selected" Click="RevertTweaks_Click" Margin="0,0,8,0" />
-                            <Button Content="Apply selected" Style="{StaticResource PrimaryButton}" Click="ApplyTweaks_Click" />
-                        </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="TweaksList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource Accent}" VerticalAlignment="Top" FontSize="11" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                        <Grid>
+                            <Border x:Name="StartupPage">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Enable selected" Click="EnableStartup_Click" Margin="0,0,8,0" />
+                                        <Button Content="Disable selected" Style="{StaticResource PrimaryButton}" Click="DisableStartup_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="StartupList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="ServicesPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Re-enable selected" Click="EnableServices_Click" Margin="0,0,8,0" />
+                                        <Button Content="Stop and disable selected" Style="{StaticResource PrimaryButton}" Click="DisableServices_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="ServicesList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
                     </DockPanel>
                 </TabItem>
 
@@ -417,151 +586,6 @@
                                         <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}"
                                                 Padding="10" Margin="0,0,10,10" Width="220">
                                             <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Name}" />
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Debloat">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Remove selected" Style="{StaticResource PrimaryButton}" Click="RemoveBloatware_Click" />
-                        </StackPanel>
-                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
-                                   Text="Pre-installed apps most people never open. Removing one affects this PC only; most can be reinstalled from the Microsoft Store." />
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="BloatwareList">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}"
-                                                Padding="10" Margin="0,0,10,10" Width="220">
-                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" FontSize="10" />
-                                                </StackPanel>
-                                            </CheckBox>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Duplicates">
-                    <DockPanel Margin="16">
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                            <Button DockPanel.Dock="Right" Content="Scan" Click="ScanDuplicates_Click" Margin="8,0,0,0" />
-                            <TextBox x:Name="DuplicatesFolderBox" DockPanel.Dock="Right" Width="260" Margin="8,0,0,0" VerticalContentAlignment="Center" />
-                            <Button Content="Browse..." Click="BrowseDuplicatesFolder_Click" HorizontalAlignment="Left" />
-                        </DockPanel>
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Delete selected" Style="{StaticResource PrimaryButton}" Click="DeleteDuplicates_Click" />
-                        </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="DuplicatesList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding Header}" FontWeight="SemiBold" Margin="0,0,0,6" />
-                                                <ItemsControl ItemsSource="{Binding Files}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <DockPanel Margin="0,2">
-                                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                                    <TextBlock Text="{Binding Description}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                                                </CheckBox>
-                                                            </DockPanel>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Large Files">
-                    <DockPanel Margin="16">
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                            <Button DockPanel.Dock="Right" Content="Scan" Click="ScanLargeFiles_Click" Margin="8,0,0,0" />
-                            <TextBox x:Name="LargeFilesFolderBox" DockPanel.Dock="Right" Width="260" Margin="8,0,0,0" VerticalContentAlignment="Center" />
-                            <Button Content="Browse..." Click="BrowseLargeFilesFolder_Click" HorizontalAlignment="Left" />
-                        </DockPanel>
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Delete selected" Style="{StaticResource PrimaryButton}" Click="DeleteLargeFiles_Click" />
-                        </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="LargeFilesList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" Typography.NumeralAlignment="Tabular" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Uninstall">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                            <ItemsControl x:Name="LeftoversList" Margin="0,0,0,8">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,6">
-                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" />
-                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                                </StackPanel>
-                                            </CheckBox>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <StackPanel Orientation="Horizontal">
-                                <Button x:Name="DeleteLeftoversButton" Content="Delete leftover folders" Click="DeleteLeftovers_Click" Margin="0,0,8,0" Visibility="Collapsed" />
-                                <Button Content="Uninstall selected" Style="{StaticResource PrimaryButton}" Click="UninstallApps_Click" />
-                            </StackPanel>
-                        </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="InstalledAppsList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

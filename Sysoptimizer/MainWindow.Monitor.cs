@@ -36,7 +36,7 @@ public partial class MainWindow
         Tabs.SelectionChanged += (_, e) =>
         {
             if (e.Source != Tabs) return; // SelectionChanged bubbles up from every ComboBox inside the tabs too
-            if (Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "History" }) _ = LoadHistory();
+            if (Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "History" }) { _animateChart = true; _ = LoadHistory(); }
             if (Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "Privacy" }) RefreshPrivacy();
         };
         InitHistory();
@@ -98,7 +98,7 @@ public partial class MainWindow
 
         if (processesShown && processes != null) UpdateProcessRows();
         if (PrivacyList.IsVisible && _tick % 5 == 0) RefreshPrivacy();
-        if (HistoryChart.IsVisible && _historyEnd == null && _tick % 10 == 0) _ = LoadHistory();
+        if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _tick % 10 == 0) _ = LoadHistory();
 
         if (_tick == 15 && !_pawnIoHintShown)
         {

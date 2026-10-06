@@ -21,7 +21,7 @@ namespace Sysoptimizer;
 public partial class MainWindow
 {
     private const string IconFont = "Segoe Fluent Icons, Segoe MDL2 Assets";
-    private const double BadgeRow = 28, TempBand = 18;
+    private const double BadgeRow = 28, TempBand = 45;
 
     private double _historyHours = 1;
     private DateTime? _historyEnd; // null = follow "now"
@@ -32,8 +32,37 @@ public partial class MainWindow
     private List<DateTime> _histProcTimes = new();
     private Dictionary<DateTime, List<ProcSample>> _histProcs = new();
     private Line? _cursorLine;
+    private Ellipse? _cursorDot;
+    private Border? _cursorValue;
+    private float[] _chartPeaks = Array.Empty<float>();
+    private float[] _chartTemps = Array.Empty<float>();
+    private Columns _chartCols;
 
-    private int _navDays = 3;
+    /// <summary>
+    /// The chart's columns, laid on a fixed time grid: column k always covers the same absolute stretch of
+    /// time (Origin + k·Seconds), however the view is scrolled. Measured from the view's left edge instead,
+    /// every drag frame regrouped the samples into different columns and the curve shimmered; on the grid a
+    /// drag only slides it sideways. Column k is drawn from Offset + k·Step pixels.
+    /// </summary>
+    private readonly record struct Columns(DateTime Origin, double Seconds, double Step, double Offset, int Count)
+    {
+        public double Center(int k) => Offset + (k + 0.5) * Step;
+        public double Left(int k) => Offset + k * Step;
+    }
+
+    private static Columns MakeColumns(DateTime fromUtc, double span, double w, int buckets)
+    {
+        double seconds = span / buckets;
+        long ticks = Math.Max(1, (long)(seconds * TimeSpan.TicksPerSecond));
+        var origin = new DateTime(fromUtc.Ticks - fromUtc.Ticks % ticks, DateTimeKind.Utc);
+        return new Columns(origin, seconds, seconds / span * w, (origin - fromUtc).TotalSeconds / span * w, buckets + 2);
+    }
+    private double _chartWidth;
+    private Func<double, double> _chartY = v => 0;
+    private bool _animateChart = true;
+    private double? _hoverX;
+
+    private double _navHours = 24;
     private List<SysSample> _navData = new();
     private DateTime _navFrom, _navTo, _navLoadedAt;
     private bool _navDragging;
@@ -46,50 +75,145 @@ public partial class MainWindow
         RetentionCombo.SelectedItem = RetentionCombo.Items.Cast<ComboBoxItem>()
             .FirstOrDefault(i => (string)i.Tag == HistoryStore.RetentionDays.ToString()) ?? RetentionCombo.Items[1];
 
+        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
+            if (key?.GetValue("NavigatorHours") is int savedSpan) _navHours = savedSpan;
+        NavigatorSpanCombo.SelectedItem = NavigatorSpanCombo.Items.Cast<ComboBoxItem>()
+            .FirstOrDefault(i => (string)i.Tag == _navHours.ToString()) ?? NavigatorSpanCombo.SelectedItem;
+
         HistoryChart.SizeChanged += (_, _) => DrawHistory();
+        HistoryChart.LostMouseCapture += (_, _) => { if (_pressX != null) CancelSelection(); }; // capture taken away mid-press
         HistoryNavigator.SizeChanged += (_, _) => DrawNavigator();
         ThemeManager.ThemeChanged += () => { DrawHistory(); DrawNavigator(); }; // the heat gradients are built from theme colours
     }
 
-    private async Task LoadHistory()
-    {
-        if (_historyLoading) return;
-        _historyLoading = true;
-        try
-        {
-            var to = _historyEnd ?? DateTime.Now;
-            var from = to.AddHours(-_historyHours);
-            bool minutely = _historyHours > 24;
-            var data = await Task.Run(() => minutely ? HistoryStore.ReadMinutes(from, to) : HistoryStore.Read(from, to));
+    // --- data: whole days cached in memory, so scrolling redraws from RAM on every frame ---
 
-            // The overview re-reads days at a time — only when it's stale, its span changed, or the window left it.
-            var navFrom = _navDays == 0 ? (HistoryStore.OldestDay() ?? DateTime.Now.Date) : DateTime.Now.AddDays(-_navDays);
-            if (from < navFrom) navFrom = from;
-            if ((DateTime.Now - _navLoadedAt).TotalSeconds > 60 || Math.Abs((navFrom - _navFrom).TotalMinutes) > 1)
+    private readonly Dictionary<(DateTime Day, bool Minutely), (HistoryData Data, DateTime LoadedAt)> _dayCache = new();
+    private readonly HashSet<(DateTime Day, bool Minutely)> _dayLoading = new();
+    private bool _histProcsDirty;
+    private const int CachedDays = 10; // ~5 MB a day at per-second resolution
+
+    /// <summary>Re-reads what changed (today) and shows the committed range — buttons, ticks, end of a drag.</summary>
+    private Task LoadHistory()
+    {
+        var to = _historyEnd ?? DateTime.Now;
+        var from = to.AddHours(-_historyHours);
+        if (_dayCache.TryGetValue((DateTime.Today, _historyHours > 24), out var today) && (DateTime.Now - today.LoadedAt).TotalSeconds > 8 && to >= DateTime.Today)
+            RequestDay(DateTime.Today, _historyHours > 24); // today keeps growing; the redraw follows when it lands
+        ShowRange(from, to, final: true);
+        return RefreshNavigator(from, to);
+    }
+
+    /// <summary>
+    /// Draws [from, to] from the day cache, synchronously — cheap enough to run on every mouse move. Days
+    /// not cached yet are requested in the background and drawn the moment they arrive; the rest is drawn
+    /// now. <paramref name="final"/> also refreshes what's too heavy for every frame (the top-apps list).
+    /// </summary>
+    private void ShowRange(DateTime from, DateTime to, bool final)
+    {
+        bool minutely = (to - from).TotalHours > 24;
+        var data = new HistoryData(new(), new(), new());
+        bool complete = true;
+        DateTime fromUtc = from.ToUniversalTime(), toUtc = to.ToUniversalTime();
+        for (var day = from.Date; day <= to.Date; day = day.AddDays(1))
+        {
+            if (!_dayCache.TryGetValue((day, minutely), out var cached)) { RequestDay(day, minutely); complete = false; continue; }
+            data.System.AddRange(Slice(cached.Data.System, s => s.Time, fromUtc, toUtc));
+            data.Processes.AddRange(Slice(cached.Data.Processes, p => p.Time, fromUtc, toUtc));
+            data.Events.AddRange(Slice(cached.Data.Events, e => e.Time, fromUtc, toUtc));
+        }
+
+        (_historyFrom, _historyTo, _historyMinutely, _hist) = (from, to, minutely, data);
+        _histProcsDirty = true;
+        HistoryRangeText.Text = $"{from:ddd d MMM HH:mm} – {to:ddd d MMM HH:mm}"
+            + (!complete ? " · loading…" : data.System.Count == 0 ? " · nothing recorded" : "")
+            + (minutely ? " · per-minute peaks (click to zoom in to every second)" : "");
+        DrawHistory();
+        if (final || complete) UpdateRangeList(); // skipped mid-drag only while a day is still loading
+    }
+
+    /// <summary>The part of a time-sorted list inside [from, to], found by binary search — no scan per frame.</summary>
+    private static IEnumerable<T> Slice<T>(List<T> sorted, Func<T, DateTime> time, DateTime from, DateTime to)
+    {
+        int Lower(DateTime t)
+        {
+            int lo = 0, hi = sorted.Count;
+            while (lo < hi) { int mid = (lo + hi) / 2; if (time(sorted[mid]) < t) lo = mid + 1; else hi = mid; }
+            return lo;
+        }
+        int start = Lower(from), end = Lower(to.AddTicks(1));
+        return sorted.GetRange(start, end - start);
+    }
+
+    private void RequestDay(DateTime day, bool minutely)
+    {
+        var key = (day, minutely);
+        if (!_dayLoading.Add(key)) return;
+        Task.Run(() => HistoryStore.ReadDay(day, minutely)).ContinueWith(t =>
+        {
+            _dayLoading.Remove(key);
+            if (t.IsCompletedSuccessfully) _dayCache[key] = (t.Result, DateTime.Now);
+            TrimDayCache();
+            if (_historyFrom.Date <= day && day <= _historyTo.Date) ShowRange(_historyFrom, _historyTo, final: !_navDragging);
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    /// <summary>Keeps the days around the view, drops the ones furthest from it beyond the cap.</summary>
+    private void TrimDayCache()
+    {
+        var center = _historyFrom.AddTicks((_historyTo - _historyFrom).Ticks / 2).Date;
+        foreach (var key in _dayCache.Keys.OrderByDescending(k => Math.Abs((k.Day - center).TotalDays)).ToList())
+        {
+            if (_dayCache.Count <= CachedDays) break;
+            if (key.Day >= _historyFrom.Date && key.Day <= _historyTo.Date) continue;
+            _dayCache.Remove(key);
+        }
+    }
+
+    private void UpdateRangeList()
+    {
+        HistoryRangeTitle.Text = $"TOP APPS IN THIS RANGE (AVERAGE {MetricLabel().ToUpperInvariant()})";
+        HistoryRangeList.ItemsSource = HistoryStore.TopProcesses(_hist.Processes, SortKey()).Select(t => new OptionItem
+        {
+            Name = t.Name,
+            Description = $"CPU peak {t.PeakCpu:0}% · {FormatMB(t.PeakRamMB)} peak" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
+            Note = _historyMetric switch { "mem" => FormatMB(t.AvgRamMB), "gpu" => $"{t.AvgGpu:0.0}% GPU", _ => $"{t.AvgCpu:0.0}% CPU" },
+        }).ToList();
+    }
+
+    /// <summary>
+    /// The overview strip: the chosen span ending now — or, when the view is further back than that reaches,
+    /// the same span centred on the view, so a zoomed-in window never shrinks to a sliver of "the last 3 days".
+    /// Up to 6 h it's drawn from the per-second data (an hour of per-minute peaks is only 60 points).
+    /// </summary>
+    private async Task RefreshNavigator(DateTime from, DateTime to)
+    {
+        var now = DateTime.Now;
+        double spanH = _navHours > 0 ? _navHours : Math.Max(1, (now - (HistoryStore.OldestDay() ?? now.Date)).TotalHours);
+        spanH = Math.Max(spanH, (to - from).TotalHours * 1.25); // the window must fit, with room to move
+        var navTo = now;
+        var navFrom = now.AddHours(-spanH);
+        // Also once the window is dragged to the strip's left end: re-centring there lets the next drag carry on back.
+        if (from < navFrom.AddHours(spanH * 0.1))
+        {
+            var center = from + (to - from) / 2;
+            navTo = center.AddHours(spanH / 2) > now ? now : center.AddHours(spanH / 2);
+            navFrom = navTo.AddHours(-spanH);
+        }
+
+        bool moved = Math.Abs((navFrom - _navFrom).TotalHours) > spanH * 0.01 || Math.Abs((navTo - _navTo).TotalHours) > spanH * 0.01;
+        if (!_historyLoading && (moved || (now - _navLoadedAt).TotalSeconds > 60))
+        {
+            _historyLoading = true;
+            try
             {
-                var navTo = DateTime.Now;
-                _navData = await Task.Run(() => HistoryStore.ReadMinutes(navFrom, navTo, systemOnly: true).System);
+                bool perSecond = spanH <= 6;
+                _navData = await Task.Run(() => perSecond ? HistoryStore.Read(navFrom, navTo).System : HistoryStore.ReadMinutes(navFrom, navTo, systemOnly: true).System);
                 (_navFrom, _navTo, _navLoadedAt) = (navFrom, navTo, DateTime.Now);
             }
-
-            (_historyFrom, _historyTo, _historyMinutely, _hist) = (from, to, minutely, data);
-            _histProcs = data.Processes.GroupBy(p => p.Time).ToDictionary(g => g.Key, g => g.ToList());
-            _histProcTimes = _histProcs.Keys.OrderBy(t => t).ToList();
-
-            HistoryRangeText.Text = $"{from:ddd d MMM HH:mm} – {to:ddd d MMM HH:mm}" + (data.System.Count == 0 ? " · nothing recorded" : "")
-                                    + (minutely ? " · per-minute peaks (click to zoom in to every second)" : "");
-            HistoryRangeTitle.Text = $"TOP APPS IN THIS RANGE (AVERAGE {MetricLabel().ToUpperInvariant()})";
-            HistoryRangeList.ItemsSource = HistoryStore.TopProcesses(data.Processes, SortKey()).Select(t => new OptionItem
-            {
-                Name = t.Name,
-                Description = $"CPU peak {t.PeakCpu:0}% · {FormatMB(t.PeakRamMB)} peak" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
-                Note = _historyMetric switch { "mem" => FormatMB(t.AvgRamMB), "gpu" => $"{t.AvgGpu:0.0}% GPU", _ => $"{t.AvgCpu:0.0}% CPU" },
-            }).ToList();
-
-            DrawHistory();
-            DrawNavigator();
+            finally { _historyLoading = false; }
         }
-        finally { _historyLoading = false; }
+        if (!_navDragging) DrawNavigator();
     }
 
     private static string FormatMB(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";
@@ -125,6 +249,7 @@ public partial class MainWindow
         var c = HistoryChart;
         c.Children.Clear();
         _cursorLine = null;
+        _selectionRect = null;
         double w = c.ActualWidth, h = c.ActualHeight;
         if (w <= 0 || h <= 0 || _historyTo <= _historyFrom) return;
 
@@ -143,9 +268,11 @@ public partial class MainWindow
         }
 
         var samples = _hist.System;
-        int buckets = Math.Max(1, (int)(w / 2));
-        double bucketSec = span / buckets;
-        double gapLimit = Math.Max(_historyMinutely ? 150 : 5, bucketSec * 1.5);
+        // Never more columns than recorded samples: zoomed to a minute, 3px columns would be 0.2 s wide and
+        // most would hold nothing, breaking the curve into needles between the 1-second readings.
+        double resolution = _historyMinutely ? 60 : 1;
+        var cols = MakeColumns(fromUtc, span, w, Math.Max(1, (int)Math.Min(w / 3, span / resolution)));
+        double gapLimit = Math.Max(_historyMinutely ? 150 : 5, cols.Seconds * 1.5);
 
         // Gaps: shaded for sleep, a dashed baseline with a power icon when the PC was off, dashed alone
         // when Sysoptimizer simply wasn't running. Includes the stretch before the first sample.
@@ -156,82 +283,157 @@ public partial class MainWindow
             if ((s.Time - previous).TotalSeconds > gapLimit) gaps.Add((previous, s.Time));
             previous = s.Time;
         }
-        var end = (_historyEnd == null ? DateTime.UtcNow : _historyTo.ToUniversalTime());
+        var end = DateTime.UtcNow < _historyTo.ToUniversalTime() ? DateTime.UtcNow : _historyTo.ToUniversalTime();
         if ((end - previous).TotalSeconds > gapLimit) gaps.Add((previous, end));
         foreach (var (a, b) in gaps) DrawGap(c, X(a), X(b), top, bottom, ClassifyGap(a, b));
 
-        // The metric, as steps of each 2px column's peak: a spike survives any zoom level.
-        var peaks = Bucket(samples, Metric, fromUtc, span, buckets);
+        // The metric as a smooth curve through each 3px column's peak — a spike survives any zoom level,
+        // and the curve can't overshoot it (see SmoothRuns).
+        var peaks = Bucket(samples, Metric, cols);
+        int bridge = (int)(gapLimit / cols.Seconds);
+        BridgeShortGaps(peaks, bridge);
         var accent = MetricColor();
-        var line = new StreamGeometry();
-        var area = new StreamGeometry();
-        using (var lc = line.Open())
-        using (var ac = area.Open())
-        {
-            bool open = false;
-            double lastX = 0;
-            for (int i = 0; i <= buckets; i++)
-            {
-                float v = i < buckets ? peaks[i] : float.NaN;
-                double x0 = i * w / buckets, x1 = (i + 1) * w / buckets;
-                if (float.IsNaN(v))
-                {
-                    if (open) { ac.LineTo(new Point(lastX, bottom), false, false); open = false; }
-                    continue;
-                }
-                double y = Y(v);
-                if (!open)
-                {
-                    lc.BeginFigure(new Point(x0, y), false, false);
-                    ac.BeginFigure(new Point(x0, bottom), true, true);
-                    ac.LineTo(new Point(x0, y), false, false);
-                    open = true;
-                }
-                else
-                {
-                    lc.LineTo(new Point(x0, y), true, false);
-                    ac.LineTo(new Point(x0, y), false, false);
-                }
-                lc.LineTo(new Point(x1, y), true, false);
-                ac.LineTo(new Point(x1, y), false, false);
-                lastX = x1;
-            }
-        }
         // Colour follows height: the theme accent at rest, orange from ~70%, red near 100%.
         LinearGradientBrush Heat(byte hotA, byte warmA, byte restA, byte floorA) => new(new GradientStopCollection
         {
             new(Alpha(Hot, hotA), 0), new(Alpha(Warm, warmA), 0.3), new(Alpha(accent, restA), 0.5), new(Alpha(accent, floorA), 1),
         }, new Point(0, top), new Point(0, bottom)) { MappingMode = BrushMappingMode.Absolute };
-        c.Children.Add(new Path { Data = area, Fill = Heat(0x70, 0x55, 0x40, 0x06) });
-        c.Children.Add(new Path { Data = line, Stroke = Heat(0xFF, 0xFF, 0xFF, 0xFF), StrokeThickness = 1.5 });
+        var areaPath = new Path { Data = SmoothRuns(peaks, cols, Y, baseline: bottom), Fill = Heat(0x66, 0x4A, 0x38, 0x00), IsHitTestVisible = false };
+        var linePath = new Path
+        {
+            Data = SmoothRuns(peaks, cols, Y, baseline: null), Stroke = Heat(0xFF, 0xFF, 0xFF, 0xFF), StrokeThickness = 2,
+            StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, IsHitTestVisible = false,
+        };
+        linePath.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" => "LineGlowMem", "gpu" => "LineGlowGpu", _ => "LineGlowCpu" });
+        c.Children.Add(areaPath);
+        c.Children.Add(linePath);
+        (_chartPeaks, _chartWidth, _chartY, _chartCols) = (peaks, w, Y, cols);
+        if (_animateChart && samples.Count > 0)
+        {
+            // A new range or metric eases in; drag frames and live ticks redraw in place, unanimated.
+            _animateChart = false;
+            var fade = new System.Windows.Media.Animation.DoubleAnimation(0.15, 1, TimeSpan.FromMilliseconds(260))
+                { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut } };
+            areaPath.BeginAnimation(OpacityProperty, fade);
+            linePath.BeginAnimation(OpacityProperty, fade);
+        }
 
-        DrawTemperatureBand(c, w, h - TempBand / 2 - 3, fromUtc, span, buckets);
+        DrawTemperatureBand(c, h - TempBand / 2 - 3, cols, bridge);
         DrawLaunchBadges(c, X, w, bottom);
 
-        if (_historyEnd == null)
+        // By the range on screen, not the saved setting: mid-drag the view is in the past while it says "follow now".
+        if (DateTime.Now >= _historyFrom && DateTime.Now <= _historyTo.AddSeconds(30))
         {
             double nx = Math.Min(w - 1, X(DateTime.UtcNow));
             c.Children.Add(new Line { X1 = nx, X2 = nx, Y1 = 4, Y2 = bottom, Stroke = new SolidColorBrush(Hot), StrokeThickness = 1.5 });
             Place(c, new Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(Hot) }, nx - 3.5, 1);
         }
 
-        _cursorLine = new Line { Y1 = top - 4, Y2 = bottom, StrokeThickness = 1, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _cursorLine = new Line { Y1 = top - 4, Y2 = bottom, StrokeThickness = 1, Opacity = 0.45, StrokeDashArray = new DoubleCollection { 3, 3 }, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
         _cursorLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextPrimary");
         c.Children.Add(_cursorLine);
+
+        // A dot that rides the curve under the cursor, with the value beside it.
+        _cursorDot = new Ellipse { Width = 9, Height = 9, Fill = new SolidColorBrush(accent), StrokeThickness = 2, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        _cursorDot.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "CardBackground");
+        c.Children.Add(_cursorDot);
+        _cursorValue = new Border
+        {
+            Background = new SolidColorBrush(Alpha(accent, 0xE6)), CornerRadius = new CornerRadius(5), Padding = new Thickness(6, 1, 6, 2),
+            Child = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White },
+            Visibility = Visibility.Collapsed, IsHitTestVisible = false,
+        };
+        c.Children.Add(_cursorValue);
+        // A live refresh or a drag frame rebuilds the chart: put the pin (or the resting mouse's cursor) back.
+        if (_pinnedUtc is DateTime pin && pin >= fromUtc && pin <= _historyTo.ToUniversalTime()) PlaceCursor(X(pin), pinned: true);
+        else if (_pinnedUtc == null && _hoverX is double hx && c.IsMouseOver) PlaceCursor(hx, pinned: false);
 
         DrawAxis(w);
     }
 
-    /// <summary>Peak of each time column; NaN where nothing was recorded.</summary>
-    private static float[] Bucket(List<SysSample> samples, Func<SysSample, float> value, DateTime fromUtc, double span, int buckets)
+    /// <summary>
+    /// A smooth curve through each recorded run of columns (NaN breaks it), on the Resources cards' recipe:
+    /// each segment is a cubic Bezier whose control points sit at its horizontal midpoint but keep their own
+    /// end's height, so the curve is flat at every point and never swings past the two values it joins —
+    /// a 100% peak draws as 100%, never 104%. With a baseline it's closed down to it, as a fill.
+    /// </summary>
+    private static StreamGeometry SmoothRuns(float[] values, Columns cols, Func<double, double> y, double? baseline)
     {
-        var peaks = new float[buckets];
+        var geometry = new StreamGeometry();
+        int n = values.Length;
+        using (var ctx = geometry.Open())
+        {
+            int i = 0;
+            while (i < n)
+            {
+                if (float.IsNaN(values[i])) { i++; continue; }
+                int j = i;
+                while (j < n && !float.IsNaN(values[j])) j++;
+
+                var points = new List<Point>(j - i + 2);
+                for (int k = i; k < j; k++) points.Add(new Point(cols.Center(k), y(values[k])));
+                // A run's ends reach its columns' outer edges, so a lone sample still shows as a short stroke.
+                points.Insert(0, new Point(cols.Left(i), points[0].Y));
+                points.Add(new Point(cols.Left(j), points[^1].Y));
+
+                if (baseline is double b)
+                {
+                    ctx.BeginFigure(new Point(points[0].X, b), true, true);
+                    ctx.LineTo(points[0], false, true);
+                }
+                else ctx.BeginFigure(points[0], false, false);
+                for (int k = 1; k < points.Count; k++)
+                {
+                    double mid = (points[k - 1].X + points[k].X) / 2;
+                    ctx.BezierTo(new Point(mid, points[k - 1].Y), new Point(mid, points[k].Y), points[k], true, true);
+                }
+                if (baseline is double b2) ctx.LineTo(new Point(points[^1].X, b2), false, true);
+                i = j;
+            }
+        }
+        geometry.Freeze();
+        return geometry;
+    }
+
+    /// <summary>Continues the current figure through the points with the same non-overshooting Beziers.</summary>
+    private static void SmoothThrough(StreamGeometryContext ctx, List<Point> points)
+    {
+        for (int k = 1; k < points.Count; k++)
+        {
+            double mid = (points[k - 1].X + points[k].X) / 2;
+            ctx.BezierTo(new Point(mid, points[k - 1].Y), new Point(mid, points[k].Y), points[k], false, true);
+        }
+    }
+
+    /// <summary>
+    /// Joins empty columns no wider than a real gap: zoomed to a minute, a single skipped 1-second reading
+    /// (a slow sample makes the next tick wait) would otherwise snap the curve. Longer gaps stay gaps.
+    /// </summary>
+    private static void BridgeShortGaps(float[] values, int maxGap)
+    {
+        int i = 0;
+        while (i < values.Length)
+        {
+            if (!float.IsNaN(values[i])) { i++; continue; }
+            int j = i;
+            while (j < values.Length && float.IsNaN(values[j])) j++;
+            if (i > 0 && j < values.Length && j - i <= maxGap)
+                for (int k = i; k < j; k++)
+                    values[k] = values[i - 1] + (values[j] - values[i - 1]) * (k - i + 1) / (j - i + 1);
+            i = j;
+        }
+    }
+
+    /// <summary>Peak of each time column; NaN where nothing was recorded.</summary>
+    private static float[] Bucket(List<SysSample> samples, Func<SysSample, float> value, Columns cols)
+    {
+        var peaks = new float[cols.Count];
         Array.Fill(peaks, float.NaN);
         foreach (var s in samples)
         {
-            int b = (int)((s.Time - fromUtc).TotalSeconds / span * buckets);
+            int b = (int)Math.Floor((s.Time - cols.Origin).TotalSeconds / cols.Seconds);
             float v = value(s);
-            if (b < 0 || b >= buckets || float.IsNaN(v)) continue;
+            if (b < 0 || b >= cols.Count || float.IsNaN(v)) continue;
             peaks[b] = float.IsNaN(peaks[b]) ? v : Math.Max(peaks[b], v);
         }
         return peaks;
@@ -277,17 +479,41 @@ public partial class MainWindow
     }
 
     /// <summary>A band under the chart whose thickness and colour follow the temperature (CPU, or GPU on the GPU view).</summary>
-    private void DrawTemperatureBand(Canvas c, double w, double centerY, DateTime fromUtc, double span, int buckets)
+    private void DrawTemperatureBand(Canvas c, double centerY, Columns cols, int bridge)
     {
-        var temps = Bucket(_hist.System, MetricTemp, fromUtc, span, buckets);
+        int buckets = cols.Count;
+        var temps = Bucket(_hist.System, MetricTemp, cols);
+        BridgeShortGaps(temps, bridge);
         if (temps.All(float.IsNaN)) return;
-        // 70 °C is an ordinary working temperature for a desktop CPU — only genuinely hot stretches should shout.
-        double Thick(float t) => Math.Clamp((t - 35) / 60 * 9, 1.5, 9);
-        var accent = MetricColor();
-        Color Shade(float t) => t >= 85 ? Hot : t >= 75 ? Warm : t >= 60 ? Color.FromRgb(0xC9, 0x8B, 0x7A) : accent;
+        _chartTemps = temps;
+        // Steep on purpose: a desktop CPU works at ~55-90 °C, so that's the whole height — a jump from 68 to
+        // 78 °C has to show as a bump, not a hair.
+        double Thick(float t) => Math.Clamp((t - 55) / 35 * (TempBand - 6), 2, TempBand - 6);
+        var cool = MetricColor();
+        // Solid colours on a fixed scale: cool up to 55 (a Ryzen idles in the 60s), amber at 70, orange at 80,
+        // red from 88, deep red at 95.
+        (float At, Color Colour)[] scale =
+        {
+            (55, cool), (70, Color.FromRgb(0xF5, 0xB0, 0x41)), (80, Warm), (88, Hot), (95, Color.FromRgb(0xB9, 0x1C, 0x1C)),
+        };
+        Color Shade(float t)
+        {
+            if (t <= scale[0].At) return scale[0].Colour;
+            for (int s = 1; s < scale.Length; s++)
+                if (t <= scale[s].At)
+                {
+                    double f = (t - scale[s - 1].At) / (scale[s].At - scale[s - 1].At);
+                    Color a = scale[s - 1].Colour, b = scale[s].Colour;
+                    return Color.FromRgb((byte)(a.R + (b.R - a.R) * f), (byte)(a.G + (b.G - a.G) * f), (byte)(a.B + (b.B - a.B) * f));
+                }
+            return scale[^1].Colour;
+        }
 
         var geometry = new StreamGeometry();
         var stops = new GradientStopCollection();
+        // The fill's gradient runs across the band's own bounds (Path brushes map to the geometry's box).
+        int firstCol = Array.FindIndex(temps, t => !float.IsNaN(t)), lastCol = Array.FindLastIndex(temps, t => !float.IsNaN(t));
+        double bandLeft = cols.Left(firstCol), bandWidth = Math.Max(1, cols.Left(lastCol + 1) - bandLeft);
         using (var g = geometry.Open())
         {
             int i = 0;
@@ -296,16 +522,21 @@ public partial class MainWindow
                 if (float.IsNaN(temps[i])) { i++; continue; }
                 int j = i;
                 while (j < buckets && !float.IsNaN(temps[j])) j++;
-                // One closed outline per recorded run: along the top edge, back along the bottom.
-                g.BeginFigure(new Point(i * w / buckets, centerY - Thick(temps[i]) / 2), true, true);
-                for (int k = i; k < j; k++) g.LineTo(new Point((k + 0.5) * w / buckets, centerY - Thick(temps[k]) / 2), false, false);
-                for (int k = j - 1; k >= i; k--) g.LineTo(new Point((k + 0.5) * w / buckets, centerY + Thick(temps[k]) / 2), false, false);
-                for (int k = i; k < j; k += 3) stops.Add(new GradientStop(Alpha(Shade(temps[k]), 0xD0), (k + 0.5) / buckets));
+                // One closed outline per recorded run, smooth along both edges: out along the top, back along the bottom.
+                var top = Enumerable.Range(i, j - i).Select(k => new Point(cols.Center(k), centerY - Thick(temps[k]) / 2)).ToList();
+                var bottom = Enumerable.Range(i, j - i).Reverse().Select(k => new Point(cols.Center(k), centerY + Thick(temps[k]) / 2)).ToList();
+                g.BeginFigure(new Point(cols.Left(i), centerY), true, true);
+                g.LineTo(top[0], false, true);
+                SmoothThrough(g, top);
+                g.LineTo(new Point(cols.Left(j), centerY), false, true);
+                g.LineTo(bottom[0], false, true);
+                SmoothThrough(g, bottom);
+                for (int k = i; k < j; k++) stops.Add(new GradientStop(Shade(temps[k]), (cols.Center(k) - bandLeft) / bandWidth)); // one stop per column: no blur
                 i = j;
             }
         }
         var band = new Path { Data = geometry, Fill = new LinearGradientBrush(stops, new Point(0, 0), new Point(1, 0)) };
-        band.ToolTip = "Temperature: thicker and redder is hotter";
+        band.ToolTip = _historyMetric == "gpu" ? "GPU temperature: thicker and redder is hotter" : "CPU temperature: thicker and redder is hotter";
         c.Children.Add(band);
     }
 
@@ -344,13 +575,13 @@ public partial class MainWindow
     {
         HistoryAxis.Children.Clear();
         double span = (_historyTo - _historyFrom).TotalSeconds;
-        int[] steps = { 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800 };
+        int[] steps = { 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800 };
         int step = steps.FirstOrDefault(s => span / s <= 8, 604800);
         var t = _historyFrom.Date.AddSeconds(Math.Ceiling((_historyFrom - _historyFrom.Date).TotalSeconds / step) * step);
         for (; t <= _historyTo; t = t.AddSeconds(step))
         {
             double x = (t - _historyFrom).TotalSeconds / span * w;
-            string text = step >= 86400 || t.TimeOfDay == TimeSpan.Zero ? t.ToString("ddd d") : t.ToString("HH:mm");
+            string text = step >= 86400 || t.TimeOfDay == TimeSpan.Zero ? t.ToString("ddd d") : t.ToString(step < 60 ? "HH:mm:ss" : "HH:mm");
             var label = Label(text);
             label.Width = 60;
             label.TextAlignment = TextAlignment.Center;
@@ -358,23 +589,199 @@ public partial class MainWindow
         }
     }
 
-    // --- hover / click ---
+    // --- hover / pin / zoom ---
+
+    private DateTime? _pinnedUtc; // a clicked moment: its line, dot and app list stay put while the mouse moves on
+    private bool _frozeForPin;    // pinning stopped "follow now"; unpinning resumes it
+
+    private DateTime TimeAt(double x) =>
+        _historyFrom.ToUniversalTime().AddSeconds(x / HistoryChart.ActualWidth * (_historyTo - _historyFrom).TotalSeconds);
+
+    private double XOfUtc(DateTime utc) =>
+        (utc - _historyFrom.ToUniversalTime()).TotalSeconds / (_historyTo - _historyFrom).TotalSeconds * HistoryChart.ActualWidth;
 
     private void HistoryChart_MouseMove(object sender, MouseEventArgs e)
     {
         double w = HistoryChart.ActualWidth;
         if (w <= 0 || _historyTo <= _historyFrom) return;
         double x = Math.Clamp(e.GetPosition(HistoryChart).X, 0, w);
-        if (_cursorLine != null) { _cursorLine.X1 = _cursorLine.X2 = x; _cursorLine.Visibility = Visibility.Visible; }
+        _hoverX = x;
+        if (_pressX != null && e.LeftButton == MouseButtonState.Released) CancelSelection(); // the release went elsewhere
+        if (_pressX is double start && e.LeftButton == MouseButtonState.Pressed && (_chartSelecting || Math.Abs(x - start) > DragThreshold))
+        {
+            _chartSelecting = true;
+            HideCursor();
+            UpdateSelection(start, x);
+            return;
+        }
+        if (_pinnedUtc != null) return; // pinned: everything stays on the pinned moment
+        PlaceCursor(x, pinned: false);
+        ShowDetailsAt(TimeAt(x), pinned: false);
+    }
+
+    private void HistoryChart_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _hoverX = null;
+        if (_pinnedUtc == null) HideCursor();
+    }
+
+    // Press, then: release in place = pin that moment; drag = select a stretch and zoom to it on release.
+    private double? _pressX;
+    private bool _chartSelecting;
+    private Rectangle? _selectionRect;
+    private const double DragThreshold = 5;
+
+    private void HistoryChart_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        double w = HistoryChart.ActualWidth;
+        if (w <= 0 || _historyTo <= _historyFrom) return;
+        double x = Math.Clamp(e.GetPosition(HistoryChart).X, 0, w);
+        if (e.ClickCount >= 2) { _pressX = null; ZoomTo(TimeAt(x)); return; }
+        _pressX = x;
+        HistoryChart.CaptureMouse();
+    }
+
+    private void HistoryChart_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_pressX is not double start) return;
+        _pressX = null;
+        HistoryChart.ReleaseMouseCapture();
+        double x = Math.Clamp(e.GetPosition(HistoryChart).X, 0, HistoryChart.ActualWidth);
+        if (_chartSelecting) { _chartSelecting = false; ZoomToSelection(Math.Min(start, x), Math.Max(start, x)); return; }
+        PinAt(x);
+    }
+
+    /// <summary>
+    /// Pins a moment: the line, the dot and the app list below stay on it while the mouse moves on, and a
+    /// live view stops scrolling so it can't drift away. Clicking elsewhere moves the pin; clicking the pinned
+    /// line releases it.
+    /// </summary>
+    private void PinAt(double x)
+    {
+        if (_pinnedUtc is DateTime pin && Math.Abs(XOfUtc(pin) - x) <= 6) { Unpin(); return; }
+        var time = TimeAt(x);
+        _pinnedUtc = time;
+        if (_historyEnd == null) { _historyEnd = _historyTo; _frozeForPin = true; }
+        PlaceCursor(x, pinned: true);
+        ShowDetailsAt(time, pinned: true);
+    }
+
+    /// <summary>
+    /// Drops a press or selection whose release never arrived (Alt+Tab mid-drag, a window popping up over
+    /// this one) — otherwise the next click would finish it and zoom to a zero-width stretch.
+    /// </summary>
+    private void CancelSelection()
+    {
+        _pressX = null;
+        _chartSelecting = false;
+        if (_selectionRect != null) HistoryChart.Children.Remove(_selectionRect);
+        _selectionRect = null;
+        if (HistoryChart.IsMouseCaptured) HistoryChart.ReleaseMouseCapture();
+    }
+
+    /// <summary>Draws the stretch being selected, with its times and length in the title above the app list.</summary>
+    private void UpdateSelection(double start, double x)
+    {
+        double left = Math.Min(start, x), width = Math.Abs(x - start);
+        if (_selectionRect == null || !HistoryChart.Children.Contains(_selectionRect))
+        {
+            var accent = MetricColor();
+            _selectionRect = new Rectangle
+            {
+                Fill = new SolidColorBrush(Alpha(accent, 0x2A)), Stroke = new SolidColorBrush(Alpha(accent, 0xC0)),
+                StrokeThickness = 1, RadiusX = 3, RadiusY = 3, IsHitTestVisible = false,
+            };
+            HistoryChart.Children.Add(_selectionRect);
+        }
+        _selectionRect.Width = Math.Max(1, width);
+        _selectionRect.Height = Math.Max(1, HistoryChart.ActualHeight - BadgeRow - TempBand - 6);
+        Canvas.SetLeft(_selectionRect, left);
+        Canvas.SetTop(_selectionRect, BadgeRow);
+        var (from, to) = (TimeAt(left).ToLocalTime(), TimeAt(left + width).ToLocalTime());
+        HistoryCursorTitle.Text = $"Release to zoom to {from:ddd HH:mm:ss} – {to:HH:mm:ss} ({Length(to - from)})";
+    }
+
+    private static string Length(TimeSpan d) =>
+        d.TotalHours >= 1 ? $"{(int)d.TotalHours} h {d.Minutes} min" : d.TotalMinutes >= 1 ? $"{(int)d.TotalMinutes} min {d.Seconds} s" : $"{d.Seconds} s";
+
+    /// <summary>Zooms to exactly the dragged stretch (at least a minute), at per-second resolution under a day.</summary>
+    private void ZoomToSelection(double left, double right)
+    {
+        var from = TimeAt(left).ToLocalTime();
+        var to = TimeAt(right).ToLocalTime();
+        if (to - from < TimeSpan.FromMinutes(1)) to = from.AddMinutes(1);
+        _historyHours = (to - from).TotalHours;
+        _historyEnd = to >= DateTime.Now.AddSeconds(-30) ? null : to;
+        _frozeForPin = false;
+        _animateChart = true;
+        ClearRangePills();
+        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch to zoom into it";
+        _ = LoadHistory();
+    }
+
+    /// <summary>A width no pill offers: the pills no longer describe the window, so none stays lit.</summary>
+    private void ClearRangePills()
+    {
+        foreach (var pill in ((Panel)HistoryRange1h.Parent).Children.OfType<RadioButton>().Where(r => r.GroupName == "HistoryRange"))
+            pill.IsChecked = false;
+    }
+
+    private void Unpin()
+    {
+        _pinnedUtc = null;
+        if (_hoverX is double hx) { PlaceCursor(hx, pinned: false); ShowDetailsAt(TimeAt(hx), pinned: false); }
+        else HideCursor();
+        if (_frozeForPin) { _frozeForPin = false; _historyEnd = null; _ = LoadHistory(); }
+    }
+
+    /// <summary>The hour around a moment, at per-second resolution; a pin made by the double-click's first click moves along.</summary>
+    private void ZoomTo(DateTime utc)
+    {
+        if (_historyHours <= 1) return;
+        _animateChart = true;
+        if (_pinnedUtc != null) _pinnedUtc = utc;
+        _frozeForPin = false; // zooming is deliberate navigation: unpinning afterwards shouldn't jump back to now
+        var end = utc.ToLocalTime().AddMinutes(30);
+        _historyEnd = end >= DateTime.Now ? null : end;
+        if (HistoryRange1h.IsChecked == true) _ = LoadHistory();
+        else HistoryRange1h.IsChecked = true; // its Checked handler reloads
+    }
+
+    private void PlaceCursor(double x, bool pinned)
+    {
+        if (_cursorLine == null) return;
+        _cursorLine.X1 = _cursorLine.X2 = x;
+        _cursorLine.StrokeDashArray = pinned ? null : new DoubleCollection { 3, 3 };
+        _cursorLine.Opacity = pinned ? 0.9 : 0.45;
+        _cursorLine.StrokeThickness = pinned ? 1.5 : 1;
+        _cursorLine.Visibility = Visibility.Visible;
+        MoveCursorDot(x);
+    }
+
+    private void HideCursor()
+    {
+        foreach (var element in new UIElement?[] { _cursorLine, _cursorDot, _cursorValue })
+            if (element != null) element.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>The readings and the running apps at a moment, in the panel under the chart.</summary>
+    private void ShowDetailsAt(DateTime time, bool pinned)
+    {
+        if (_histProcsDirty)
+        {
+            _histProcs = _hist.Processes.GroupBy(p => p.Time).ToDictionary(g => g.Key, g => g.ToList());
+            _histProcTimes = _histProcs.Keys.OrderBy(t => t).ToList();
+            _histProcsDirty = false;
+        }
         double span = (_historyTo - _historyFrom).TotalSeconds;
-        var time = _historyFrom.ToUniversalTime().AddSeconds(x / w * span);
-        double tolerance = Math.Max(_historyMinutely ? 90 : 3, span / w * 3);
+        double tolerance = Math.Max(_historyMinutely ? 90 : 3, span / Math.Max(1, HistoryChart.ActualWidth) * 3);
+        string prefix = pinned ? "PINNED · " : "", suffix = pinned ? "   (click the line to unpin)" : "";
 
         string Val(float v, string u) => float.IsNaN(v) ? "—" : $"{v:0}{u}";
         if (_hist.System.Count > 0 && Nearest(_hist.System, time, s => s.Time) is var s && Math.Abs((s.Time - time).TotalSeconds) <= tolerance)
-            HistoryCursorTitle.Text = $"{s.Time.ToLocalTime():ddd HH:mm:ss}{(_historyMinutely ? " (minute peak)" : "")} — CPU {Val(s.Cpu, "%")} · MEM {Val(s.Mem, "%")} · GPU {Val(s.Gpu, "%")} · {Val(s.CpuTemp, "°")} / {Val(s.GpuTemp, "°")}";
+            HistoryCursorTitle.Text = $"{prefix}{s.Time.ToLocalTime():ddd HH:mm:ss}{(_historyMinutely ? " (minute peak)" : "")} — CPU {Val(s.Cpu, "%")} · MEM {Val(s.Mem, "%")} · GPU {Val(s.Gpu, "%")} · {Val(s.CpuTemp, "°")} / {Val(s.GpuTemp, "°")}{suffix}";
         else
-            HistoryCursorTitle.Text = $"{time.ToLocalTime():ddd HH:mm:ss} — nothing recorded";
+            HistoryCursorTitle.Text = $"{prefix}{time.ToLocalTime():ddd HH:mm:ss} — nothing recorded{suffix}";
 
         if (_histProcTimes.Count == 0) { HistoryCursorList.ItemsSource = null; return; }
         var at = Nearest(_histProcTimes, time, t => t);
@@ -388,21 +795,25 @@ public partial class MainWindow
             }).ToList();
     }
 
-    private void HistoryChart_MouseLeave(object sender, MouseEventArgs e)
+    /// <summary>Puts the dot on the curve at the cursor's column, the value in a bubble beside it.</summary>
+    private void MoveCursorDot(double x)
     {
-        if (_cursorLine != null) _cursorLine.Visibility = Visibility.Collapsed;
-    }
+        if (_cursorDot == null || _cursorValue == null || _chartPeaks.Length == 0) return;
+        int b = Math.Clamp((int)Math.Floor((x - _chartCols.Offset) / _chartCols.Step), 0, _chartPeaks.Length - 1);
+        float v = _chartPeaks[b];
+        if (float.IsNaN(v)) { _cursorDot.Visibility = _cursorValue.Visibility = Visibility.Collapsed; return; }
 
-    /// <summary>Click = zoom to the hour around that moment, at full per-second resolution.</summary>
-    private void HistoryChart_Click(object sender, MouseButtonEventArgs e)
-    {
-        double w = HistoryChart.ActualWidth;
-        if (w <= 0 || _historyHours <= 1) return;
-        var time = _historyFrom.AddSeconds(e.GetPosition(HistoryChart).X / w * (_historyTo - _historyFrom).TotalSeconds);
-        var end = time.AddMinutes(30);
-        _historyEnd = end >= DateTime.Now ? null : end;
-        if (HistoryRange1h.IsChecked == true) _ = LoadHistory();
-        else HistoryRange1h.IsChecked = true; // its Checked handler reloads
+        double cx = _chartCols.Center(b), cy = _chartY(v);
+        Canvas.SetLeft(_cursorDot, cx - _cursorDot.Width / 2);
+        Canvas.SetTop(_cursorDot, cy - _cursorDot.Height / 2);
+        float temp = b < _chartTemps.Length ? _chartTemps[b] : float.NaN;
+        ((TextBlock)_cursorValue.Child).Text = float.IsNaN(temp) ? $"{v:0}%" : $"{v:0}% · {temp:0}°C";
+        _cursorValue.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        // Beside the dot, flipped to the left near the right edge so it never clips.
+        double bx = cx + 10 + _cursorValue.DesiredSize.Width > _chartWidth ? cx - 10 - _cursorValue.DesiredSize.Width : cx + 10;
+        Canvas.SetLeft(_cursorValue, bx);
+        Canvas.SetTop(_cursorValue, Math.Max(BadgeRow, cy - _cursorValue.DesiredSize.Height - 6));
+        _cursorDot.Visibility = _cursorValue.Visibility = Visibility.Visible;
     }
 
     private static T Nearest<T>(List<T> sorted, DateTime time, Func<T, DateTime> timeOf)
@@ -429,42 +840,38 @@ public partial class MainWindow
         var fromUtc = _navFrom.ToUniversalTime();
         double X(DateTime local) => (local - _navFrom).TotalSeconds / span * w;
 
-        for (var day = _navFrom.Date.AddDays(1); day < _navTo; day = day.AddDays(1))
+        // Day ticks on long spans, hour ticks on short ones — a reference to steer by while dragging.
+        bool hourly = span <= 12 * 3600;
+        var tickStep = hourly ? TimeSpan.FromHours(span <= 3 * 3600 ? 0.25 : 1) : TimeSpan.FromDays(1);
+        var firstTick = hourly ? _navFrom.Date.AddHours(_navFrom.Hour) : _navFrom.Date;
+        for (var t = firstTick + tickStep; t < _navTo; t += tickStep)
         {
-            var tick = new Line { X1 = X(day), X2 = X(day), Y1 = 0, Y2 = h, StrokeThickness = 1, Opacity = 0.2 };
+            if (t <= _navFrom) continue;
+            var tick = new Line { X1 = X(t), X2 = X(t), Y1 = 0, Y2 = h, StrokeThickness = 1, Opacity = 0.2 };
             tick.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
             c.Children.Add(tick);
-            if (span / 86400 <= 14) Place(c, Label(day.ToString("ddd d"), 9), X(day) + 3, 1);
+            if (hourly ? t.Minute == 0 || span <= 3 * 3600 : span / 86400 <= 14)
+                Place(c, Label(t.ToString(hourly ? "HH:mm" : "ddd d"), 9), X(t) + 3, 1);
         }
 
-        int buckets = Math.Max(1, (int)(w / 2));
-        var peaks = Bucket(_navData, Metric, fromUtc, span, buckets);
-        var area = new StreamGeometry();
-        using (var g = area.Open())
+        var navCols = MakeColumns(fromUtc, span, w, Math.Max(1, (int)(w / 3)));
+        var peaks = Bucket(_navData, Metric, navCols);
+        var navColor = MetricColor();
+        c.Children.Add(new Path
         {
-            bool open = false;
-            double lastX = 0;
-            for (int i = 0; i <= buckets; i++)
-            {
-                float v = i < buckets ? peaks[i] : float.NaN;
-                if (float.IsNaN(v)) { if (open) { g.LineTo(new Point(lastX, h), false, false); open = false; } continue; }
-                double x0 = i * w / buckets, x1 = (i + 1) * w / buckets, y = h - 2 - Math.Clamp(v, 0, 100) / 100 * (h - 12);
-                if (!open) { g.BeginFigure(new Point(x0, h), true, true); open = true; }
-                g.LineTo(new Point(x0, y), false, false);
-                g.LineTo(new Point(x1, y), false, false);
-                lastX = x1;
-            }
-        }
-        c.Children.Add(new Path { Data = area, Fill = new SolidColorBrush(Alpha(MetricColor(), 0x60)), IsHitTestVisible = false });
+            Data = SmoothRuns(peaks, navCols, v => h - 2 - Math.Clamp(v, 0, 100) / 100 * (h - 12), baseline: h),
+            Fill = new LinearGradientBrush(Alpha(navColor, 0x70), Alpha(navColor, 0x10), 90), IsHitTestVisible = false,
+        });
 
         var accent = MetricColor();
+        double realWidth = X(_historyTo) - X(_historyFrom);
         _navSelection = new Border
         {
-            Width = Math.Max(6, X(_historyTo) - X(_historyFrom)), Height = h - 2,
+            Width = Math.Max(NavGrabWidth, realWidth), Height = h - 2,
             BorderBrush = new SolidColorBrush(accent), BorderThickness = new Thickness(1.5), CornerRadius = new CornerRadius(4),
             Background = new SolidColorBrush(Alpha(accent, 0x22)), IsHitTestVisible = false,
         };
-        Place(c, _navSelection, Math.Clamp(X(_historyFrom), 0, w - _navSelection.Width), 1);
+        Place(c, _navSelection, Math.Clamp(X(_historyFrom) - (_navSelection.Width - realWidth) / 2, 0, Math.Max(0, w - _navSelection.Width)), 1);
 
         _navStartLabel = Label("", 9, "TextPrimary");
         _navEndLabel = Label("", 9, "TextPrimary");
@@ -479,14 +886,17 @@ public partial class MainWindow
     private enum NavDrag { None, Move, Left, Right }
     private NavDrag _navDrag;
     private double _navGrabOffset;
-    private const double EdgeGrip = 7, MinSelection = 8;
+    private const double EdgeGrip = 7, MinSelection = 8, NavGrabWidth = 14;
 
     private NavDrag HitTestSelection(double x)
     {
         if (_navSelection == null) return NavDrag.None;
         double left = Canvas.GetLeft(_navSelection), right = left + _navSelection.Width;
-        if (Math.Abs(x - left) <= EdgeGrip) return NavDrag.Left;
-        if (Math.Abs(x - right) <= EdgeGrip) return NavDrag.Right;
+        // A one-hour window over three days is ~9 px wide: full-size grips on both edges would cover all of
+        // it, and grabbing its middle would resize instead of move. The grips shrink with the box.
+        double grip = Math.Min(EdgeGrip, _navSelection.Width / 4);
+        if (Math.Abs(x - left) <= grip) return NavDrag.Left;
+        if (Math.Abs(x - right) <= grip) return NavDrag.Right;
         return x > left && x < right ? NavDrag.Move : NavDrag.None;
     }
 
@@ -503,6 +913,8 @@ public partial class MainWindow
         }
         _navGrabOffset = x - Canvas.GetLeft(_navSelection);
         _navDragging = HistoryNavigator.CaptureMouse();
+        UpdateNavigatorLabels();
+        PreviewDrag();
     }
 
     private void Navigator_MouseMove(object sender, MouseEventArgs e)
@@ -532,6 +944,18 @@ public partial class MainWindow
                 break;
         }
         UpdateNavigatorLabels();
+        PreviewDrag();
+    }
+
+    private DateTime _lastPreview;
+
+    /// <summary>The chart follows the box while it's dragged, redrawn from the day cache — about once per frame.</summary>
+    private void PreviewDrag()
+    {
+        if ((DateTime.UtcNow - _lastPreview).TotalMilliseconds < 15) return;
+        _lastPreview = DateTime.UtcNow;
+        var (from, to) = NavigatorSelectionTimes();
+        ShowRange(from, to, final: false);
     }
 
     private double ClampLeft(double left, double width) => Math.Clamp(left, 0, Math.Max(0, HistoryNavigator.ActualWidth - width));
@@ -547,19 +971,26 @@ public partial class MainWindow
         {
             // A width no pill offers: the pills no longer describe the window, so none stays lit.
             _historyHours = Math.Max(1.0 / 60, (to - from).TotalHours);
-            foreach (var pill in ((Panel)HistoryRange1h.Parent).Children.OfType<RadioButton>().Where(r => r.GroupName == "HistoryRange"))
-                pill.IsChecked = false;
+            ClearRangePills();
         }
         _historyEnd = to >= DateTime.Now.AddMinutes(-1) ? null : to;
         _navDrag = NavDrag.None;
         _ = LoadHistory();
     }
 
+    /// <summary>
+    /// The times the box stands for. Resizing reads both edges; anything else reads the box's centre and keeps
+    /// the view's own length — the box may be drawn wider than the span (NavGrabWidth) so it stays grabbable.
+    /// </summary>
     private (DateTime From, DateTime To) NavigatorSelectionTimes()
     {
         double w = HistoryNavigator.ActualWidth, span = (_navTo - _navFrom).TotalSeconds;
         double left = Canvas.GetLeft(_navSelection!), right = left + _navSelection!.Width;
-        return (_navFrom.AddSeconds(left / w * span), _navFrom.AddSeconds(right / w * span));
+        if (_navDrag is NavDrag.Left or NavDrag.Right)
+            return (_navFrom.AddSeconds(left / w * span), _navFrom.AddSeconds(right / w * span));
+        var center = _navFrom.AddSeconds((left + right) / 2 / w * span);
+        var half = TimeSpan.FromHours(_historyHours / 2);
+        return (center - half, center + half);
     }
 
     private TextBlock? _navStartLabel, _navEndLabel;
@@ -578,24 +1009,28 @@ public partial class MainWindow
 
     private void HistoryRange_Checked(object sender, RoutedEventArgs e)
     {
+        _animateChart = true;
         if (sender is RadioButton { Tag: string hours }) _historyHours = double.Parse(hours);
         if (IsLoaded) _ = LoadHistory();
     }
 
     private void HistoryMetric_Checked(object sender, RoutedEventArgs e)
     {
+        _animateChart = true;
         if (sender is RadioButton { Tag: string metric }) _historyMetric = metric;
         if (IsLoaded) _ = LoadHistory();
     }
 
     private void HistoryPrev_Click(object sender, RoutedEventArgs e)
     {
+        _animateChart = true;
         _historyEnd = (_historyEnd ?? DateTime.Now).AddHours(-_historyHours);
         _ = LoadHistory();
     }
 
     private void HistoryNext_Click(object sender, RoutedEventArgs e)
     {
+        _animateChart = true;
         var next = (_historyEnd ?? DateTime.Now).AddHours(_historyHours);
         _historyEnd = next >= DateTime.Now ? null : next;
         _ = LoadHistory();
@@ -603,15 +1038,20 @@ public partial class MainWindow
 
     private void HistoryNow_Click(object sender, RoutedEventArgs e)
     {
+        _animateChart = true;
         _historyEnd = null;
         _ = LoadHistory();
     }
 
     private void NavigatorSpan_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (NavigatorSpanCombo.SelectedItem is ComboBoxItem { Tag: string days }) _navDays = int.Parse(days);
+        if (NavigatorSpanCombo.SelectedItem is not ComboBoxItem { Tag: string hours }) return;
+        _navHours = double.Parse(hours);
         _navLoadedAt = DateTime.MinValue;
-        if (IsLoaded) _ = LoadHistory();
+        if (!IsLoaded) return;
+        using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer"))
+            key.SetValue("NavigatorHours", (int)_navHours, RegistryValueKind.DWord);
+        _ = LoadHistory();
     }
 
     private void Retention_Changed(object sender, SelectionChangedEventArgs e)

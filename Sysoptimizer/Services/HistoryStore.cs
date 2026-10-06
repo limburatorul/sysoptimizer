@@ -115,6 +115,15 @@ public static class HistoryStore
         return data;
     }
 
+    /// <summary>One whole local day, per second or per minute — the unit the History tab caches to scroll smoothly.</summary>
+    public static HistoryData ReadDay(DateTime day, bool minutes)
+    {
+        var data = new HistoryData(new(), new(), new());
+        using var reader = minutes ? OpenMinutes(day) : OpenRaw(day);
+        if (reader != null) Parse(reader, long.MinValue, long.MaxValue, data, systemOnly: false);
+        return data;
+    }
+
     private static readonly Dictionary<DateTime, List<SysSample>> MinuteCache = new();
 
     /// <summary>
@@ -231,8 +240,10 @@ public static class HistoryStore
             else if (f[0] == "E")
                 data.Events.Add(new HistoryEvent(time, f[2], f.Length > 3 ? f[3] : ""));
         }
-        // Minute summaries list S rows, then P, then E — callers need each list in time order.
+        // Minute summaries list S rows, then P, then E, and a launch is written ~10 s after the time it
+        // carries — callers need each list in time order.
         data.Processes.Sort((a, b) => a.Time.CompareTo(b.Time));
+        data.Events.Sort((a, b) => a.Time.CompareTo(b.Time));
     }
 
     private static float P(string s) => float.TryParse(s, NumberStyles.Float, Inv, out float v) ? v : float.NaN;

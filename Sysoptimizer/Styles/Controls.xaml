@@ -280,7 +280,7 @@
                         </ToggleButton>
                         <ContentPresenter IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}"
                                           Margin="{TemplateBinding Padding}" HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <Popup x:Name="Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True"
+                        <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True"
                                Focusable="False" PopupAnimation="Slide">
                             <Border Background="{DynamicResource SurfaceElevated}" BorderBrush="{DynamicResource Border}"
                                     BorderThickness="1" CornerRadius="{DynamicResource PopupRadius}"

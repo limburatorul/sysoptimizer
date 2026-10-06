@@ -74,7 +74,7 @@ public partial class MainWindow : Window
         (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, _ => ThemeGlass }).IsChecked = true;
 
         _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 22 });
-        _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false });
+        _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 30 });
         _liveGraphs.Add(new GraphBinding { Container = GpuGraphGrid, Line = GpuSparkline, Fill = GpuAreaFill, History = _gpuHistory, AutoScale = false });
         CompositionTarget.Rendering += OnRendering;
 
@@ -866,6 +866,15 @@ public partial class MainWindow : Window
     }
 
     private readonly List<Action> _clipUpdaters = new();
+
+    /// <summary>The pills at the top of a grouped tab: shows the page the pill names, hides its siblings.</summary>
+    private void SubPage_Checked(object sender, RoutedEventArgs e)
+    {
+        // Tag binds by ElementName, which isn't resolved yet when the first pill is checked from XAML —
+        // that page is the visible one already.
+        if (sender is not System.Windows.Controls.RadioButton { Tag: FrameworkElement page } || page.Parent is not System.Windows.Controls.Panel pages) return;
+        foreach (UIElement child in pages.Children) child.Visibility = child == page ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void Theme_Checked(object sender, RoutedEventArgs e)
     {
