@@ -25,6 +25,9 @@ public class ResourceSnapshot
     public List<double> CpuThreads { get; set; } = new();
     public double CpuFrequencyGHz { get; set; }
     public double UptimeSeconds { get; set; }
+    public double CpuTempC { get; set; } = double.NaN;
+    public double GpuTempC { get; set; } = double.NaN;
+    public Dictionary<int, double> GpuByPid { get; set; } = new();
     public double MemUsedGB { get; set; }
     public double MemTotalGB { get; set; }
     public double MemPercent { get; set; }

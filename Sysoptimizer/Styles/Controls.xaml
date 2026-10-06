@@ -221,7 +221,8 @@
                         <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
                             <TabPanel IsItemsHost="True" Margin="8,0" />
                         </Border>
-                        <ContentPresenter ContentSource="SelectedContent" Margin="0" />
+                        <!-- The name is load-bearing: UI Automation (screen readers) finds the tab's content only through this part. -->
+                        <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" Margin="0" />
                     </DockPanel>
                 </ControlTemplate>
             </Setter.Value>

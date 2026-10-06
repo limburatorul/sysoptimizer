@@ -58,6 +58,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
+[UninstallDelete]
+; The recorded resource history.
+Type: filesandordirs; Name: "{commonappdata}\{#AppName}"
+
 [Code]
 { Setup cannot replace files the running app holds open, so stop it first. }
 procedure StopSysoptimizer();
@@ -78,4 +82,28 @@ function InitializeUninstall(): Boolean;
 begin
   StopSysoptimizer();
   Result := True;
+end;
+
+{ Undo what the app set up outside its folder: the logon task for background recording, and every app
+  it blocked from starting — without Sysoptimizer there'd be nothing left to unblock them with. Only IFEO
+  entries carrying our marker are touched. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode, I: Integer;
+  Names: TArrayOfString;
+  Key: String;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "{#AppName}" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if RegGetSubkeyNames(HKLM64, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+    begin
+      Key := 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\' + Names[I];
+      if RegValueExists(HKLM64, Key, 'SysoptimizerBlocked') then
+      begin
+        RegDeleteValue(HKLM64, Key, 'Debugger');
+        RegDeleteValue(HKLM64, Key, 'SysoptimizerBlocked');
+        RegDeleteKeyIfEmpty(HKLM64, Key);
+      end;
+    end;
 end;

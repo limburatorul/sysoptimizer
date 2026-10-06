@@ -27,8 +27,11 @@ public class ResourceMonitor : IDisposable
     private readonly double _cpuBaseMHz;
     private readonly List<int> _cpuThreadCounters = new();
     private readonly List<(string name, int active, int read, int write, int latency)> _diskCounters = new();
-    private readonly List<int> _gpuUtilCounters = new();
+    private readonly List<(int Counter, int Pid)> _gpuUtilCounters = new();
     private readonly List<int> _gpuMemCounters = new();
+    // Opening LibreHardwareMonitor takes a second or two (it probes every chip); never let it delay the first frame.
+    private readonly Task<SensorService?> _sensors;
+    public string? SensorError { get; private set; }
     private readonly HashSet<string> _knownGpuUtilInstances = new();
     private readonly HashSet<string> _knownGpuMemInstances = new();
 
@@ -37,6 +40,11 @@ public class ResourceMonitor : IDisposable
 
     public ResourceMonitor()
     {
+        _sensors = Task.Run(() =>
+        {
+            try { return new SensorService(); }
+            catch (Exception ex) { SensorError = ex.Message; return null; } // temperatures stay blank; the UI says why
+        });
         _cpuCounter = _query.AddCounter(@"\Processor(_Total)\% Processor Time");
         _cpuFreqCounter = _query.AddCounter(@"\Processor Information(_Total)\% Processor Performance");
         _cpuBaseMHz = ReadBaseClockMHz();
@@ -77,7 +85,8 @@ public class ResourceMonitor : IDisposable
             if (!instance.Contains("engtype_3D", StringComparison.OrdinalIgnoreCase)) continue;
             if (!_knownGpuUtilInstances.Add(instance)) continue;
             int counter = _query.AddCounter($@"\GPU Engine({instance})\Utilization Percentage");
-            if (counter >= 0) _gpuUtilCounters.Add(counter);
+            var pid = Regex.Match(instance, @"pid_(\d+)_");
+            if (counter >= 0) _gpuUtilCounters.Add((counter, pid.Success ? int.Parse(pid.Groups[1].Value) : 0));
         }
 
         foreach (var instance in Pdh.EnumInstances("GPU Adapter Memory"))
@@ -131,8 +140,19 @@ public class ResourceMonitor : IDisposable
         snap.GpuAvailable = _gpuUtilCounters.Count > 0;
         if (snap.GpuAvailable)
         {
-            snap.GpuPercent = Math.Min(100, _gpuUtilCounters.Sum(c => _query.Read(c)));
+            foreach (var (counter, pid) in _gpuUtilCounters)
+            {
+                double value = _query.Read(counter);
+                if (value > 0) snap.GpuByPid[pid] = snap.GpuByPid.GetValueOrDefault(pid) + value;
+            }
+            snap.GpuPercent = Math.Min(100, snap.GpuByPid.Values.Sum());
             snap.GpuMemUsedGB = _gpuMemCounters.Sum(c => _query.Read(c)) / 1073741824.0;
+        }
+
+        if (_sensors is { IsCompletedSuccessfully: true, Result: { } sensors })
+        {
+            try { (snap.CpuTempC, snap.GpuTempC) = sensors.Read(); }
+            catch (Exception ex) { SensorError = ex.Message; } // blanks this sample's temperatures only
         }
 
         var now = DateTime.UtcNow;
@@ -183,5 +203,9 @@ public class ResourceMonitor : IDisposable
         }
     }
 
-    public void Dispose() => _query.Dispose();
+    public void Dispose()
+    {
+        _query.Dispose();
+        if (_sensors.IsCompletedSuccessfully) _sensors.Result?.Dispose();
+    }
 }

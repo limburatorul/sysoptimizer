@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _resourceTimer;
     private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromMinutes(10) };
     private UpdateDialog? _updateDialog;
+    private string? _updateNotified;
     private readonly Queue<(DateTime Time, double Value)> _cpuHistory = new();
     private readonly Queue<(DateTime Time, double Value)> _memHistory = new();
     private readonly Queue<(DateTime Time, double Value)> _gpuHistory = new();
@@ -82,6 +83,7 @@ public partial class MainWindow : Window
         ApplyRoundedClip(GpuCardBorder);
         CpuThreadsGrid.SizeChanged += (_, e) => { if (e.WidthChanged) LayoutCpuThreads(); };
 
+        InitMonitoring();
         StartResourceMonitor();
 
         CleanupList.ItemsSource = _cleanupItems;
@@ -171,6 +173,18 @@ public partial class MainWindow : Window
         if (_updateDialog != null) { _updateDialog.Activate(); return null; }
         var release = await Updater.Check(manual);
         if (release == null) return manual ? $"Sysoptimizer {Updater.Current} is the latest version." : null;
+        if (!IsVisible)
+        {
+            // Recording in the tray for days: the dialog needs the window, so say it from the tray instead —
+            // once per version — and clicking the notification opens the window with the dialog.
+            if (_tray != null && _updateNotified != release.Tag)
+            {
+                _updateNotified = release.Tag;
+                _tray.ShowBalloonTip(15000, $"Sysoptimizer {release.Version} is available",
+                    "Click to see what's new and install it.", System.Windows.Forms.ToolTipIcon.Info);
+            }
+            return null;
+        }
 
         _updateDialog = new UpdateDialog(this, release);
         _updateDialog.Closed += (_, _) => { Updater.Dismiss(release); _updateDialog = null; };
@@ -217,15 +231,32 @@ public partial class MainWindow : Window
         _ = UpdateResources();
     }
 
+    private bool _sampling;
+
     private async Task UpdateResources()
+    {
+        // The timer ticks every second regardless; a slow sample (gateway pings) must not overlap the next
+        // one — PDH and the sensor library aren't thread-safe, and the history would get double rows.
+        if (_sampling) return;
+        _sampling = true;
+        try { await UpdateResourcesCore(); }
+        finally { _sampling = false; }
+    }
+
+    private static string Temp(double c) => double.IsNaN(c) ? "" : $" · {c:0}°C";
+
+    private async Task UpdateResourcesCore()
     {
         // Sample() pings each adapter's gateway, which can take up to ~300ms per NIC — keep that off the UI thread.
         var snap = await Task.Run(() => _resourceMonitor!.Sample());
 
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
-        CpuDetailText.Text = snap.CpuFrequencyGHz > 0
-            ? $"{snap.CpuFrequencyGHz:0.00} GHz · Up {FormatUptime(snap.UptimeSeconds)}"
-            : $"Up {FormatUptime(snap.UptimeSeconds)}";
+        CpuDetailText.Text = string.Join(" · ", new[]
+        {
+            snap.CpuFrequencyGHz > 0 ? $"{snap.CpuFrequencyGHz:0.00} GHz" : null,
+            double.IsNaN(snap.CpuTempC) ? null : $"{snap.CpuTempC:0}°C",
+            $"Up {FormatUptime(snap.UptimeSeconds)}",
+        }.Where(s => s != null));
         PushHistory(_cpuHistory, snap.CpuPercent);
         for (int i = 0; i < snap.CpuThreads.Count; i++)
         {
@@ -241,7 +272,7 @@ public partial class MainWindow : Window
         if (snap.GpuAvailable)
         {
             GpuPercentText.Text = $"{snap.GpuPercent:0}%";
-            GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM";
+            GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM{Temp(snap.GpuTempC)}";
             PushHistory(_gpuHistory, snap.GpuPercent);
         }
 
@@ -262,6 +293,8 @@ public partial class MainWindow : Window
             PushHistory(card.SpeedHistory, n.DownMbps + n.UpMbps);
             if (n.LatencyAvailable) PushHistory(card.LatencyHistory, n.LatencyMs);
         }
+
+        await OnResourceTick(snap);
     }
 
     // Always sampled, so ticking "Per thread" shows the full history straight away. No glow on these:

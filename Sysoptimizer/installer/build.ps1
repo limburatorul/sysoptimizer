@@ -26,6 +26,13 @@ dotnet publish $project -c Release -r win-x64 --self-contained true -o $publishD
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw "publish failed" }
 
+# The Claude connector: a small console exe beside the app (trimmed — it's only System.Text.Json and file reads).
+$mcpProject = Join-Path (Split-Path $root -Parent) 'Sysoptimizer.Mcp\Sysoptimizer.Mcp.csproj'
+dotnet publish $mcpProject -c Release -r win-x64 --self-contained true -o $publishDir `
+    -p:PublishSingleFile=true -p:PublishTrimmed=true "-p:Version=$version" --nologo -v quiet
+if ($LASTEXITCODE -ne 0) { throw "MCP publish failed" }
+Get-ChildItem $publishDir -Filter *.pdb | Remove-Item
+
 $size = (Get-ChildItem $publishDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
 Write-Host ("  published: {0:N0} MB in dist\app" -f $size) -ForegroundColor DarkGray
 
