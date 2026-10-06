@@ -48,7 +48,11 @@ public partial class MainWindow
         {
             SetupTray();
             // Re-point the logon task at this exe: an install or update may have moved it since it was made.
+            // Never from a Debug build: a test run would capture the task, and logon (and the updater's
+            // restart) would then keep launching that stale dev exe instead of the installed one.
+#if !DEBUG
             Task.Run(BackgroundMode.Enable);
+#endif
         }
         Closing += (_, e) =>
         {

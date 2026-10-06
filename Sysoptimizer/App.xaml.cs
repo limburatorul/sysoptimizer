@@ -20,6 +20,11 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // High, like Task Manager and for the same reason: a monitor has to keep running while something else
+        // saturates every core — at Normal, a load running at High (a stress test, some games) starved the
+        // whole app and the history stayed empty until it stopped. Its own work is light.
+        System.Diagnostics.Process.GetCurrentProcess().PriorityClass = System.Diagnostics.ProcessPriorityClass.High;
+
         ThemeManager.LoadSaved();
         base.OnStartup(e);
 

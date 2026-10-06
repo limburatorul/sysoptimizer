@@ -246,10 +246,25 @@ public partial class MainWindow : Window
 
     private static string Temp(double c) => double.IsNaN(c) ? "" : $" · {c:0}°C";
 
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentThread();
+    [DllImport("kernel32.dll")] private static extern bool SetThreadPriority(IntPtr thread, int priority);
+    private const int THREAD_PRIORITY_TIME_CRITICAL = 15; // .NET's ThreadPriority stops at Highest
+
     private async Task UpdateResourcesCore()
     {
         // Sample() pings each adapter's gateway, which can take up to ~300ms per NIC — keep that off the UI thread.
-        var snap = await Task.Run(() => _resourceMonitor!.Sample());
+        // The sample runs at the top non-realtime thread priority: with every core busy (a stress test, a game)
+        // the sensor library — which hops onto each core in turn to read it — otherwise queued behind the load
+        // on all of them, a sample took 5-10 s, and nothing was recorded until the load stopped. Highest wasn't
+        // enough against a load running at High priority. It's a few milliseconds a second.
+        var snap = await Task.Run(() =>
+        {
+            var thread = Thread.CurrentThread;
+            var previous = thread.Priority;
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+            try { return _resourceMonitor!.Sample(); }
+            finally { thread.Priority = previous; }
+        });
 
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
         CpuDetailText.Text = string.Join(" · ", new[]

@@ -493,9 +493,10 @@ public partial class MainWindow
         BridgeShortGaps(temps, bridge);
         if (temps.All(float.IsNaN)) return;
         _chartTemps = temps;
-        // Steep on purpose: a desktop CPU works at ~55-90 °C, so that's the whole height — a jump from 68 to
-        // 78 °C has to show as a bump, not a hair.
-        double Thick(float t) => Math.Clamp((t - 55) / 35 * (TempBand - 6), 2, TempBand - 6);
+        // Thickness in proportion to the temperature itself (100 °C = full height): a scale starting at 55 °C
+        // drew 73 °C ten times thicker than 42 °C, a difference that looked huge for one that isn't.
+        // The colour is what marks the hot stretches.
+        double Thick(float t) => Math.Clamp(t / 100 * (TempBand - 6), 3, TempBand - 6);
         // Colour on a fixed scale, so a stretch keeps its colour however the view moves (relative to what's on
         // screen, scrolling a hot stretch away lit up the rest): cool up to 60 °C, coral by 78, red at 90.
         (double At, Color Colour)[] scale = { (0, Cool), (0.6, Color.FromRgb(0xE9, 0x79, 0x5A)), (1, Hot) };
