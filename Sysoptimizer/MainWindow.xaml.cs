@@ -68,10 +68,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AboutVersionText.Text = $"Version {Updater.Current}";
         SourceInitialized += (_, _) => WindowGlass.EnableAcrylic(this);
         Closed += (_, _) => { _resourceTimer?.Stop(); _resourceMonitor?.Dispose(); CompositionTarget.Rendering -= OnRendering; ThemeManager.ThemeChanged -= OnThemeChanged; _updateTimer.Stop(); };
         ThemeManager.ThemeChanged += OnThemeChanged;
-        (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, _ => ThemeGlass }).IsChecked = true;
+        (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, "Cyberpunk" => ThemeCyberpunk, _ => ThemeGlass }).IsChecked = true;
 
         _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 22 });
         _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 30 });

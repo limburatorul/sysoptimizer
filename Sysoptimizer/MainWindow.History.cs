@@ -50,9 +50,19 @@ public partial class MainWindow
         public double Left(int k) => Offset + k * Step;
     }
 
+    /// <summary>
+    /// Column lengths come from a fixed ladder of round durations, so resizing the window (or zooming a
+    /// little) keeps the same columns and only stretches them — a length straight from the width changed
+    /// with every pixel, regrouping the samples and making the curve shimmer exactly like a drag once did.
+    /// </summary>
+    private static readonly int[] ColumnSeconds =
+        { 1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600, 900, 1200, 1800, 3600, 7200, 10800, 21600, 43200, 86400 };
+
     private static Columns MakeColumns(DateTime fromUtc, double span, double w, int buckets)
     {
-        double seconds = span / buckets;
+        double raw = span / buckets;
+        double seconds = raw < 1 ? raw : ColumnSeconds.FirstOrDefault(c => c >= raw, (int)Math.Ceiling(raw));
+        buckets = (int)Math.Ceiling(span / seconds);
         long ticks = Math.Max(1, (long)(seconds * TimeSpan.TicksPerSecond));
         var origin = new DateTime(fromUtc.Ticks - fromUtc.Ticks % ticks, DateTimeKind.Utc);
         return new Columns(origin, seconds, seconds / span * w, (origin - fromUtc).TotalSeconds / span * w, buckets + 2);
@@ -81,7 +91,7 @@ public partial class MainWindow
             .FirstOrDefault(i => (string)i.Tag == _navHours.ToString()) ?? NavigatorSpanCombo.SelectedItem;
 
         HistoryChart.SizeChanged += (_, _) => DrawHistory();
-        HistoryChart.LostMouseCapture += (_, _) => { if (_pressX != null) CancelSelection(); }; // capture taken away mid-press
+        HistoryChart.LostMouseCapture += (_, _) => { if (_pressX != null) CancelSelection(); EndPan(); }; // capture taken away mid-press
         HistoryNavigator.SizeChanged += (_, _) => DrawNavigator();
         ThemeManager.ThemeChanged += () => { DrawHistory(); DrawNavigator(); }; // the heat gradients are built from theme colours
     }
@@ -224,7 +234,7 @@ public partial class MainWindow
 
     private Color ThemeColor(string key, Color fallback) => (TryFindResource(key) as SolidColorBrush)?.Color ?? fallback;
     private Color MetricColor() => ThemeColor(_historyMetric switch { "mem" => "AccentMem", "gpu" => "AccentGpu", _ => "AccentCpu" }, Colors.SteelBlue);
-    private static readonly Color Hot = Color.FromRgb(0xEF, 0x44, 0x44), Warm = Color.FromRgb(0xF9, 0x73, 0x16);
+    private static readonly Color Hot = Color.FromRgb(0xEF, 0x44, 0x44), Warm = Color.FromRgb(0xF9, 0x73, 0x16), Cool = Color.FromRgb(0x5B, 0x6B, 0xD8);
     private static Color Alpha(Color c, byte a) => Color.FromArgb(a, c.R, c.G, c.B);
 
     private TextBlock Label(string text, double size = 10, string brush = "TextSecondary")
@@ -271,7 +281,7 @@ public partial class MainWindow
         // Never more columns than recorded samples: zoomed to a minute, 3px columns would be 0.2 s wide and
         // most would hold nothing, breaking the curve into needles between the 1-second readings.
         double resolution = _historyMinutely ? 60 : 1;
-        var cols = MakeColumns(fromUtc, span, w, Math.Max(1, (int)Math.Min(w / 3, span / resolution)));
+        var cols = MakeColumns(fromUtc, span, w, Math.Max(1, (int)Math.Min(w / 4, span / resolution)));
         double gapLimit = Math.Max(_historyMinutely ? 150 : 5, cols.Seconds * 1.5);
 
         // Gaps: shaded for sleep, a dashed baseline with a power icon when the PC was off, dashed alone
@@ -287,8 +297,7 @@ public partial class MainWindow
         if ((end - previous).TotalSeconds > gapLimit) gaps.Add((previous, end));
         foreach (var (a, b) in gaps) DrawGap(c, X(a), X(b), top, bottom, ClassifyGap(a, b));
 
-        // The metric as a smooth curve through each 3px column's peak — a spike survives any zoom level,
-        // and the curve can't overshoot it (see SmoothRuns).
+        // The metric as each 4px column's peak — a spike survives any zoom level (see SmoothRuns).
         var peaks = Bucket(samples, Metric, cols);
         int bridge = (int)(gapLimit / cols.Seconds);
         BridgeShortGaps(peaks, bridge);
@@ -352,15 +361,16 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// A smooth curve through each recorded run of columns (NaN breaks it), on the Resources cards' recipe:
-    /// each segment is a cubic Bezier whose control points sit at its horizontal midpoint but keep their own
-    /// end's height, so the curve is flat at every point and never swings past the two values it joins —
-    /// a 100% peak draws as 100%, never 104%. With a baseline it's closed down to it, as a fill.
+    /// Each recorded run of columns (NaN breaks it) as plateaus — every column flat at its peak — joined by
+    /// short rounded steps, AppControl's calm look. A curve through the column centres turned every lone
+    /// peak into a needle; a plateau shows it as a tower as wide as the time it covers, and can't overshoot.
+    /// With a baseline it's closed down to it, as a fill.
     /// </summary>
     private static StreamGeometry SmoothRuns(float[] values, Columns cols, Func<double, double> y, double? baseline)
     {
         var geometry = new StreamGeometry();
         int n = values.Length;
+        double r = Math.Min(cols.Step * 0.35, 4); // half the width of a step's rounded turn
         using (var ctx = geometry.Open())
         {
             int i = 0;
@@ -370,24 +380,21 @@ public partial class MainWindow
                 int j = i;
                 while (j < n && !float.IsNaN(values[j])) j++;
 
-                var points = new List<Point>(j - i + 2);
-                for (int k = i; k < j; k++) points.Add(new Point(cols.Center(k), y(values[k])));
-                // A run's ends reach its columns' outer edges, so a lone sample still shows as a short stroke.
-                points.Insert(0, new Point(cols.Left(i), points[0].Y));
-                points.Add(new Point(cols.Left(j), points[^1].Y));
-
+                var start = new Point(cols.Left(i), y(values[i]));
                 if (baseline is double b)
                 {
-                    ctx.BeginFigure(new Point(points[0].X, b), true, true);
-                    ctx.LineTo(points[0], false, true);
+                    ctx.BeginFigure(new Point(start.X, b), true, true);
+                    ctx.LineTo(start, false, true);
                 }
-                else ctx.BeginFigure(points[0], false, false);
-                for (int k = 1; k < points.Count; k++)
+                else ctx.BeginFigure(start, false, false);
+                for (int k = i; k < j - 1; k++)
                 {
-                    double mid = (points[k - 1].X + points[k].X) / 2;
-                    ctx.BezierTo(new Point(mid, points[k - 1].Y), new Point(mid, points[k].Y), points[k], true, true);
+                    double edge = cols.Left(k + 1), y0 = y(values[k]), y1 = y(values[k + 1]);
+                    ctx.LineTo(new Point(edge - r, y0), true, true);
+                    ctx.BezierTo(new Point(edge, y0), new Point(edge, y1), new Point(edge + r, y1), true, true);
                 }
-                if (baseline is double b2) ctx.LineTo(new Point(points[^1].X, b2), false, true);
+                ctx.LineTo(new Point(cols.Left(j), y(values[j - 1])), true, true);
+                if (baseline is double b2) ctx.LineTo(new Point(cols.Left(j), b2), false, true);
                 i = j;
             }
         }
@@ -489,24 +496,20 @@ public partial class MainWindow
         // Steep on purpose: a desktop CPU works at ~55-90 °C, so that's the whole height — a jump from 68 to
         // 78 °C has to show as a bump, not a hair.
         double Thick(float t) => Math.Clamp((t - 55) / 35 * (TempBand - 6), 2, TempBand - 6);
-        var cool = MetricColor();
-        // Solid colours on a fixed scale: cool up to 55 (a Ryzen idles in the 60s), amber at 70, orange at 80,
-        // red from 88, deep red at 95.
-        (float At, Color Colour)[] scale =
-        {
-            (55, cool), (70, Color.FromRgb(0xF5, 0xB0, 0x41)), (80, Warm), (88, Hot), (95, Color.FromRgb(0xB9, 0x1C, 0x1C)),
-        };
+        // Colour on a fixed scale, so a stretch keeps its colour however the view moves (relative to what's on
+        // screen, scrolling a hot stretch away lit up the rest): cool up to 60 °C, coral by 78, red at 90.
+        (double At, Color Colour)[] scale = { (0, Cool), (0.6, Color.FromRgb(0xE9, 0x79, 0x5A)), (1, Hot) };
         Color Shade(float t)
         {
-            if (t <= scale[0].At) return scale[0].Colour;
+            double f = Math.Clamp((t - 60) / 30, 0, 1);
             for (int s = 1; s < scale.Length; s++)
-                if (t <= scale[s].At)
+                if (f <= scale[s].At)
                 {
-                    double f = (t - scale[s - 1].At) / (scale[s].At - scale[s - 1].At);
+                    double g = (f - scale[s - 1].At) / (scale[s].At - scale[s - 1].At);
                     Color a = scale[s - 1].Colour, b = scale[s].Colour;
-                    return Color.FromRgb((byte)(a.R + (b.R - a.R) * f), (byte)(a.G + (b.G - a.G) * f), (byte)(a.B + (b.B - a.B) * f));
+                    return Color.FromRgb((byte)(a.R + (b.R - a.R) * g), (byte)(a.G + (b.G - a.G) * g), (byte)(a.B + (b.B - a.B) * g));
                 }
-            return scale[^1].Colour;
+            return Hot;
         }
 
         var geometry = new StreamGeometry();
@@ -536,7 +539,7 @@ public partial class MainWindow
             }
         }
         var band = new Path { Data = geometry, Fill = new LinearGradientBrush(stops, new Point(0, 0), new Point(1, 0)) };
-        band.ToolTip = _historyMetric == "gpu" ? "GPU temperature: thicker and redder is hotter" : "CPU temperature: thicker and redder is hotter";
+        band.ToolTip = _historyMetric == "gpu" ? "GPU temperature: thicker and warmer is hotter" : "CPU temperature: thicker and warmer is hotter";
         c.Children.Add(band);
     }
 
@@ -604,6 +607,12 @@ public partial class MainWindow
     {
         double w = HistoryChart.ActualWidth;
         if (w <= 0 || _historyTo <= _historyFrom) return;
+        if (_pan is var (panX, panFrom, panTo))
+        {
+            if (e.RightButton == MouseButtonState.Released) { EndPan(); return; } // the release went elsewhere
+            PanTo(panFrom, panTo, e.GetPosition(HistoryChart).X - panX);
+            return;
+        }
         double x = Math.Clamp(e.GetPosition(HistoryChart).X, 0, w);
         _hoverX = x;
         if (_pressX != null && e.LeftButton == MouseButtonState.Released) CancelSelection(); // the release went elsewhere
@@ -623,6 +632,46 @@ public partial class MainWindow
     {
         _hoverX = null;
         if (_pinnedUtc == null) HideCursor();
+    }
+
+    // Right button held: the chart is dragged along under the mouse, live, and the range is kept on release.
+    private (double X, DateTime From, DateTime To)? _pan;
+
+    private void HistoryChart_MouseRightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_pressX != null || _historyTo <= _historyFrom) return;
+        _pan = (e.GetPosition(HistoryChart).X, _historyFrom, _historyTo);
+        HideCursor();
+        HistoryChart.Cursor = Cursors.SizeWE;
+        HistoryChart.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void HistoryChart_MouseRightUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_pan == null) return;
+        e.Handled = true;
+        EndPan();
+    }
+
+    /// <summary>The range dragged by dx pixels — never past now — redrawn from the day cache.</summary>
+    private void PanTo(DateTime from, DateTime to, double dx)
+    {
+        var shift = TimeSpan.FromSeconds(-dx / HistoryChart.ActualWidth * (to - from).TotalSeconds);
+        var now = DateTime.Now;
+        if (to + shift > now) shift = now - to;
+        ShowRange(from + shift, to + shift, final: false);
+    }
+
+    private void EndPan()
+    {
+        if (_pan == null) return;
+        _pan = null; // first: releasing the capture below calls back in here
+        HistoryChart.ReleaseMouseCapture();
+        HistoryChart.Cursor = Cursors.Cross;
+        _historyEnd = _historyTo >= DateTime.Now.AddSeconds(-30) ? null : _historyTo;
+        _frozeForPin = false;
+        _ = LoadHistory();
     }
 
     // Press, then: release in place = pin that moment; drag = select a stretch and zoom to it on release.
@@ -707,16 +756,32 @@ public partial class MainWindow
     /// <summary>Zooms to exactly the dragged stretch (at least a minute), at per-second resolution under a day.</summary>
     private void ZoomToSelection(double left, double right)
     {
-        var from = TimeAt(left).ToLocalTime();
-        var to = TimeAt(right).ToLocalTime();
+        _animateChart = true;
+        ZoomToRange(TimeAt(left).ToLocalTime(), TimeAt(right).ToLocalTime());
+    }
+
+    private void ZoomToRange(DateTime from, DateTime to)
+    {
         if (to - from < TimeSpan.FromMinutes(1)) to = from.AddMinutes(1);
         _historyHours = (to - from).TotalHours;
         _historyEnd = to >= DateTime.Now.AddSeconds(-30) ? null : to;
         _frozeForPin = false;
-        _animateChart = true;
         ClearRangePills();
-        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch to zoom into it";
+        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move";
         _ = LoadHistory();
+    }
+
+    /// <summary>The wheel zooms in and out around the moment under the mouse, which stays under it.</summary>
+    private void HistoryChart_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        double x = e.GetPosition(HistoryChart).X, w = HistoryChart.ActualWidth;
+        if (w <= 0 || _pressX != null) return;
+        double hours = Math.Clamp(_historyHours * Math.Pow(0.8, e.Delta / 120.0), 1.0 / 60, HistoryStore.RetentionDays * 24);
+        if (Math.Abs(hours - _historyHours) < 1e-9) return;
+        var at = TimeAt(x).ToLocalTime();
+        var from = at.AddHours(-hours * x / w);
+        ZoomToRange(from, from.AddHours(hours));
     }
 
     /// <summary>A width no pill offers: the pills no longer describe the window, so none stays lit.</summary>

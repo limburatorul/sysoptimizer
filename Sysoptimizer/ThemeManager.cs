@@ -46,7 +46,8 @@ public static class ThemeManager
     {
         new("Glass", "Glass", false),
         new("StarTrek", "Star Trek", true, (0x000000, 0x0099FF, 0x0099FF)),
-        new("StarCraft", "StarCraft", true, (0x120B07, 0xF7ECD7, 0x70542B)),
+        new("StarCraft", "StarCraft", true, (0x120B07, 0xE6DDCF, 0x4D3A26)),
+        new("Cyberpunk", "Cyberpunk", true, (0x0E0A0A, 0x0AEEFC, 0x0AEEFC)),
     };
 
     public static ThemeInfo Current { get; private set; } = Themes[0];

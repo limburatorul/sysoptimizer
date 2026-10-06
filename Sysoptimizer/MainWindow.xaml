@@ -143,27 +143,25 @@
                             <TextBlock DockPanel.Dock="Right" Text="CPU" Width="60" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                             <TextBlock x:Name="ProcessCountText" Text="APP" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                         </DockPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="ProcessesList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,6">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding GpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding RamText}" Width="90" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                                <TextBlock DockPanel.Dock="Right" Text="{Binding CpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                                <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                                    </StackPanel>
-                                                </CheckBox>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                        <ItemsControl x:Name="ProcessesList" Style="{StaticResource VirtualList}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,6">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding GpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding RamText}" Width="90" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding CpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     </DockPanel>
                 </TabItem>
 
@@ -195,7 +193,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <DockPanel>
-                                <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch to zoom into it" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextTrimming="CharacterEllipsis" />
                                 <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                     <ItemsControl x:Name="HistoryCursorList" ItemTemplate="{StaticResource HistoryRowTemplate}" />
                                 </ScrollViewer>
@@ -234,7 +232,8 @@
                         <Border CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                             <Grid>
                                 <Canvas x:Name="HistoryChart" Background="Transparent" Cursor="Cross"
-                                        MouseMove="HistoryChart_MouseMove" MouseLeave="HistoryChart_MouseLeave" MouseLeftButtonDown="HistoryChart_MouseDown" MouseLeftButtonUp="HistoryChart_MouseUp" />
+                                        MouseMove="HistoryChart_MouseMove" MouseLeave="HistoryChart_MouseLeave" MouseLeftButtonDown="HistoryChart_MouseDown" MouseLeftButtonUp="HistoryChart_MouseUp" MouseWheel="HistoryChart_MouseWheel"
+                                        MouseRightButtonDown="HistoryChart_MouseRightDown" MouseRightButtonUp="HistoryChart_MouseRightUp" />
                                 <TextBlock x:Name="HistoryRangeText" Margin="12,0,0,56" HorizontalAlignment="Left" VerticalAlignment="Bottom" Foreground="{DynamicResource TextSecondary}" FontSize="11" IsHitTestVisible="False" />
                             </Grid>
                         </Border>
@@ -598,10 +597,59 @@
                     <DockPanel Margin="16">
                         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12"
                                    Text="Apps that used your camera, microphone or location, from the log Windows keeps for its privacy indicator. Updates every few seconds while this tab is open." />
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="PrivacyList" ItemTemplate="{StaticResource HistoryRowTemplate}" />
-                        </ScrollViewer>
+                        <ItemsControl x:Name="PrivacyList" Style="{StaticResource VirtualList}" ItemTemplate="{StaticResource HistoryRowTemplate}" />
                     </DockPanel>
+                </TabItem>
+
+                <TabItem Header="About">
+                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                        <StackPanel Margin="16" MaxWidth="640" HorizontalAlignment="Left">
+                            <StackPanel.Resources>
+                                <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{DynamicResource Accent}" /></Style>
+                            </StackPanel.Resources>
+                            <TextBlock Text="Sysoptimizer" FontSize="28" FontWeight="Bold" />
+                            <TextBlock x:Name="AboutVersionText" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,6" />
+                            <TextBlock Text="Watches, records and tidies up your PC — by Protagonist Labs." Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,20" />
+
+                            <Border Padding="18,6" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                <StackPanel>
+                                    <StackPanel.Resources>
+                                        <Style TargetType="Border"><Setter Property="BorderBrush" Value="{DynamicResource Border}" /><Setter Property="BorderThickness" Value="0,0,0,1" /><Setter Property="Padding" Value="0,10" /></Style>
+                                    </StackPanel.Resources>
+                                    <Border>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"><Hyperlink x:Name="CheckUpdatesLink" Click="CheckUpdatesLink_Click">Check for updates</Hyperlink></TextBlock>
+                                            <TextBlock Text="Sysoptimizer also checks on its own and offers new versions as they come out." Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"><Hyperlink Click="ConnectClaude_Click">Connect to Claude</Hyperlink></TextBlock>
+                                            <TextBlock Text="Lets Claude read your recorded history and answer questions like &quot;what slowed my PC down yesterday?&quot;" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"><Hyperlink NavigateUri="mailto:feedback@protagonistlabs.app?subject=Sysoptimizer%20feedback" RequestNavigate="Link_Navigate">Send feedback</Hyperlink></TextBlock>
+                                            <TextBlock Text="feedback@protagonistlabs.app — bugs, ideas, anything." Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"><Hyperlink NavigateUri="https://protagonistlabs.app/sysoptimizer/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=about" RequestNavigate="Link_Navigate">Website</Hyperlink></TextBlock>
+                                            <TextBlock Text="protagonistlabs.app/sysoptimizer" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border BorderThickness="0">
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"><Hyperlink NavigateUri="https://protagonistlabs.app/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=more-apps" RequestNavigate="Link_Navigate">More apps from Protagonist Labs</Hyperlink></TextBlock>
+                                            <TextBlock Text="protagonistlabs.app" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabItem>
 
             </TabControl>
@@ -610,20 +658,13 @@
         <Border Grid.Row="1" Background="{DynamicResource SurfaceElevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
             <DockPanel Margin="16,10">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <TextBlock DockPanel.Dock="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11">
-                        <TextBlock.Resources><Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{DynamicResource Accent}" /></Style></TextBlock.Resources>
-                        Feedback: <Hyperlink NavigateUri="mailto:feedback@protagonistlabs.app?subject=Sysoptimizer%20feedback" RequestNavigate="Link_Navigate">feedback@protagonistlabs.app</Hyperlink>
-                        · <Hyperlink NavigateUri="https://protagonistlabs.app/sysoptimizer/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=footer" RequestNavigate="Link_Navigate">Website</Hyperlink>
-                        · <Hyperlink NavigateUri="https://protagonistlabs.app/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=more-apps" RequestNavigate="Link_Navigate">More apps from Protagonist Labs</Hyperlink>
-                        · <Hyperlink x:Name="CheckUpdatesLink" Click="CheckUpdatesLink_Click">Check for updates</Hyperlink>
-                        · <Hyperlink Click="ConnectClaude_Click">Connect to Claude</Hyperlink>
-                    </TextBlock>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Log" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
                         <TextBlock Text="Theme" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
                         <RadioButton x:Name="ThemeGlass" Content="Glass" GroupName="Theme" Tag="Glass" Style="{StaticResource PillToggle}" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeStarTrek" Content="Star Trek" GroupName="Theme" Tag="StarTrek" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeStarCraft" Content="StarCraft" GroupName="Theme" Tag="StarCraft" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
+                        <RadioButton x:Name="ThemeCyberpunk" Content="Cyberpunk" GroupName="Theme" Tag="Cyberpunk" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
                     </StackPanel>
                 </DockPanel>
                 <ScrollViewer Style="{StaticResource GlassScrollViewer}" VerticalScrollBarVisibility="Auto">

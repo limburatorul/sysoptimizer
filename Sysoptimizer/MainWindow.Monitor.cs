@@ -98,7 +98,7 @@ public partial class MainWindow
 
         if (processesShown && processes != null) UpdateProcessRows();
         if (PrivacyList.IsVisible && _tick % 5 == 0) RefreshPrivacy();
-        if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _tick % 10 == 0) _ = LoadHistory();
+        if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _pan == null && _tick % 10 == 0) _ = LoadHistory();
 
         if (_tick == 15 && !_pawnIoHintShown)
         {

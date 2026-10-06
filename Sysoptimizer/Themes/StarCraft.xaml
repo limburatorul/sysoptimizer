@@ -2,57 +2,58 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
 
-    <!-- Terran command console: gunmetal blue panels, hard corners, cyan energy. The three graphs take the
-         resource colors from the game — minerals (cyan), vespene gas (green), and a gold for the third. -->
+    <!-- Terran command console: gunmetal blue panels, hard corners, a steel-cyan readout. The three graphs take
+         the resource colors from the game — minerals (cyan), vespene gas (green), and a gold for the third —
+         muted to instrument tones, not neon, so it reads as a console rather than a cartoon. -->
 
     <!-- Surfaces and text -->
     <SolidColorBrush x:Key="Surface" Color="#FF070B12" />
     <SolidColorBrush x:Key="SurfaceElevated" Color="#FF0E1724" />
-    <SolidColorBrush x:Key="Border" Color="#FF2A4A66" />
+    <SolidColorBrush x:Key="Border" Color="#FF263A4D" />
     <LinearGradientBrush x:Key="CardBackground" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="#FF101C2C" Offset="0" />
         <GradientStop Color="#FF0A121E" Offset="1" />
     </LinearGradientBrush>
-    <SolidColorBrush x:Key="TextPrimary" Color="#FFD7ECF7" />
-    <SolidColorBrush x:Key="TextSecondary" Color="#FF7FA3BA" />
-    <SolidColorBrush x:Key="LogForeground" Color="#FF7CFFB2" />
+    <SolidColorBrush x:Key="TextPrimary" Color="#FFCFDDE6" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#FF7C93A3" />
+    <SolidColorBrush x:Key="LogForeground" Color="#FF9CCDB4" />
 
     <!-- Accent -->
-    <SolidColorBrush x:Key="Accent" Color="#FF37D5FF" />
-    <SolidColorBrush x:Key="AccentDim" Color="#4437D5FF" />
+    <SolidColorBrush x:Key="Accent" Color="#FF4FB3D1" />
+    <SolidColorBrush x:Key="AccentDim" Color="#444FB3D1" />
     <SolidColorBrush x:Key="OnAccent" Color="#FF02121A" />
 
     <!-- Scrollbar -->
-    <SolidColorBrush x:Key="ScrollThumb" Color="#FF35607F" />
-    <SolidColorBrush x:Key="ScrollThumbHover" Color="#B037D5FF" />
-    <SolidColorBrush x:Key="ScrollThumbActive" Color="#FF37D5FF" />
+    <SolidColorBrush x:Key="ScrollThumb" Color="#FF2F4A60" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#B04FB3D1" />
+    <SolidColorBrush x:Key="ScrollThumbActive" Color="#FF4FB3D1" />
 
     <!-- One color per metric for CPU / Memory / GPU -->
-    <SolidColorBrush x:Key="AccentCpu" Color="#FF37D5FF" />
-    <SolidColorBrush x:Key="AccentMem" Color="#FF5CF07A" />
-    <SolidColorBrush x:Key="AccentGpu" Color="#FFFFB000" />
+    <SolidColorBrush x:Key="AccentCpu" Color="#FF4FB3D1" />
+    <SolidColorBrush x:Key="AccentMem" Color="#FF6CC48A" />
+    <SolidColorBrush x:Key="AccentGpu" Color="#FFD9A441" />
 
     <!-- Tabs: flat steel plates, the open one lit with a cyan edge -->
     <SolidColorBrush x:Key="TabBackground" Color="#FF0E1724" />
-    <SolidColorBrush x:Key="TabBackgroundSelected" Color="#FF163650" />
-    <SolidColorBrush x:Key="TabForeground" Color="#FF7FA3BA" />
-    <SolidColorBrush x:Key="TabForegroundSelected" Color="#FFD7ECF7" />
-    <SolidColorBrush x:Key="TabIndicator" Color="#FF37D5FF" />
+    <SolidColorBrush x:Key="TabBackgroundSelected" Color="#FF1A2C3D" />
+    <SolidColorBrush x:Key="TabForeground" Color="#FF7C93A3" />
+    <SolidColorBrush x:Key="TabForegroundSelected" Color="#FFCFDDE6" />
+    <SolidColorBrush x:Key="TabIndicator" Color="#FF4FB3D1" />
     <Thickness x:Key="TabIndicatorThickness">0,0,0,2</Thickness>
     <Thickness x:Key="TabMargin">0,0,2,0</Thickness>
     <Thickness x:Key="TabPadding">13,10</Thickness>
 
     <!-- Buttons, pills, checkboxes -->
     <LinearGradientBrush x:Key="ButtonBackground" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#FF213F58" Offset="0" />
-        <GradientStop Color="#FF132A3E" Offset="1" />
+        <GradientStop Color="#FF1D3245" Offset="0" />
+        <GradientStop Color="#FF14222F" Offset="1" />
     </LinearGradientBrush>
-    <SolidColorBrush x:Key="ButtonForeground" Color="#FFD7ECF7" />
-    <SolidColorBrush x:Key="ButtonBorder" Color="#FF35607F" />
-    <SolidColorBrush x:Key="ButtonHoverBorder" Color="#FF37D5FF" />
+    <SolidColorBrush x:Key="ButtonForeground" Color="#FFCFDDE6" />
+    <SolidColorBrush x:Key="ButtonBorder" Color="#FF2F4A60" />
+    <SolidColorBrush x:Key="ButtonHoverBorder" Color="#FF4FB3D1" />
     <SolidColorBrush x:Key="PillBackground" Color="#FF0E1724" />
-    <SolidColorBrush x:Key="PillForeground" Color="#FF7FA3BA" />
-    <SolidColorBrush x:Key="CheckBorder" Color="#FF35607F" />
+    <SolidColorBrush x:Key="PillForeground" Color="#FF7C93A3" />
+    <SolidColorBrush x:Key="CheckBorder" Color="#FF2F4A60" />
     <Thickness x:Key="ControlBorderThickness">1</Thickness>
 
     <!-- Shape: hard corners -->
@@ -68,27 +69,27 @@
     <sys:Double x:Key="GraphStroke">1.8</sys:Double>
 
     <!-- Glow -->
-    <DropShadowEffect x:Key="LineGlow" Color="#37D5FF" BlurRadius="12" ShadowDepth="0" Opacity="0.85" />
-    <DropShadowEffect x:Key="LineGlowCpu" Color="#37D5FF" BlurRadius="18" ShadowDepth="0" Opacity="1" />
-    <DropShadowEffect x:Key="LineGlowMem" Color="#5CF07A" BlurRadius="18" ShadowDepth="0" Opacity="1" />
-    <DropShadowEffect x:Key="LineGlowGpu" Color="#FFB000" BlurRadius="18" ShadowDepth="0" Opacity="1" />
+    <DropShadowEffect x:Key="LineGlow" Color="#4FB3D1" BlurRadius="8" ShadowDepth="0" Opacity="0.45" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#4FB3D1" BlurRadius="10" ShadowDepth="0" Opacity="0.55" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#6CC48A" BlurRadius="10" ShadowDepth="0" Opacity="0.55" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#D9A441" BlurRadius="10" ShadowDepth="0" Opacity="0.55" />
 
     <!-- Area under each curve -->
     <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#6637D5FF" Offset="0" />
-        <GradientStop Color="#0037D5FF" Offset="1" />
+        <GradientStop Color="#444FB3D1" Offset="0" />
+        <GradientStop Color="#004FB3D1" Offset="1" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AreaFillCpu" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#6637D5FF" Offset="0" />
-        <GradientStop Color="#0037D5FF" Offset="1" />
+        <GradientStop Color="#444FB3D1" Offset="0" />
+        <GradientStop Color="#004FB3D1" Offset="1" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AreaFillMem" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#665CF07A" Offset="0" />
-        <GradientStop Color="#005CF07A" Offset="1" />
+        <GradientStop Color="#446CC48A" Offset="0" />
+        <GradientStop Color="#006CC48A" Offset="1" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AreaFillGpu" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#66FFB000" Offset="0" />
-        <GradientStop Color="#00FFB000" Offset="1" />
+        <GradientStop Color="#44D9A441" Offset="0" />
+        <GradientStop Color="#00D9A441" Offset="1" />
     </LinearGradientBrush>
 
 </ResourceDictionary>
