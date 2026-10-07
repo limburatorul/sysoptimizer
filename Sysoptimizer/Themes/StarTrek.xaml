@@ -6,9 +6,9 @@
          Palette follows the Star Trek: The Next Generation panels — orange #FF9900, violet #CC99CC,
          peach #FFCC99, lilac #CC99FF, sky #99CCFF. -->
 
-    <!-- Surfaces and text -->
+    <!-- Surfaces and text: everything sits on pure black, including the log panel and popups -->
     <SolidColorBrush x:Key="Surface" Color="#FF000000" />
-    <SolidColorBrush x:Key="SurfaceElevated" Color="#FF0B0B12" />
+    <SolidColorBrush x:Key="SurfaceElevated" Color="#FF000000" />
     <SolidColorBrush x:Key="Border" Color="#80CC99CC" />
     <SolidColorBrush x:Key="CardBackground" Color="Transparent" />
     <SolidColorBrush x:Key="TextPrimary" Color="#FFFFCC99" />
@@ -21,14 +21,23 @@
     <SolidColorBrush x:Key="OnAccent" Color="#FF000000" />
 
     <!-- Scrollbar -->
-    <SolidColorBrush x:Key="ScrollThumb" Color="#80CC99CC" />
-    <SolidColorBrush x:Key="ScrollThumbHover" Color="#B3FF9900" />
+    <SolidColorBrush x:Key="ScrollThumb" Color="#FF996699" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#FFCC99CC" />
     <SolidColorBrush x:Key="ScrollThumbActive" Color="#FFFF9900" />
 
     <!-- One color per metric for CPU / Memory / GPU -->
     <SolidColorBrush x:Key="AccentCpu" Color="#FFFF9900" />
     <SolidColorBrush x:Key="AccentMem" Color="#FFCC99FF" />
     <SolidColorBrush x:Key="AccentGpu" Color="#FF99CCFF" />
+
+    <!-- Good / warning / bad: the health score, and the warm and hot steps of the History heat ramp.
+         Picked to step away from the metric colors above. -->
+    <SolidColorBrush x:Key="StatusGood" Color="#FF99CC99" />
+    <SolidColorBrush x:Key="StatusWarn" Color="#FFFF6A3D" />
+    <SolidColorBrush x:Key="StatusBad" Color="#FFCC6666" />
+    <!-- Temperature band under the History chart: LCARS lilac at rest, peach-orange by 78 °C, StatusBad at 90 °C -->
+    <SolidColorBrush x:Key="TempCool" Color="#FF9999CC" />
+    <SolidColorBrush x:Key="TempWarm" Color="#FFFF9966" />
 
     <!-- Tabs: every tab is a violet pill, the open one turns orange -->
     <SolidColorBrush x:Key="TabBackground" Color="#FFCC99CC" />
@@ -47,14 +56,18 @@
     <SolidColorBrush x:Key="ButtonHoverBorder" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="PillBackground" Color="#FFCC99CC" />
     <SolidColorBrush x:Key="PillForeground" Color="#FF000000" />
-    <SolidColorBrush x:Key="CheckBorder" Color="#FFFF9900" />
+    <!-- Checked pill: solid orange, like a lit LCARS button -->
+    <SolidColorBrush x:Key="PillBackgroundSelected" Color="#FFFF9900" />
+    <SolidColorBrush x:Key="PillBorderSelected" Color="#FFFF9900" />
+    <SolidColorBrush x:Key="PillForegroundSelected" Color="#FF000000" />
+    <SolidColorBrush x:Key="CheckBorder" Color="#FFCC99CC" />
     <Thickness x:Key="ControlBorderThickness">2</Thickness>
 
     <!-- Shape: LCARS is round -->
-    <CornerRadius x:Key="CardRadius">26</CornerRadius>
+    <CornerRadius x:Key="CardRadius">18</CornerRadius>
     <CornerRadius x:Key="ControlRadius">17</CornerRadius>
     <CornerRadius x:Key="PillRadius">14</CornerRadius>
-    <CornerRadius x:Key="CheckRadius">9</CornerRadius>
+    <CornerRadius x:Key="CheckRadius">6</CornerRadius>
     <CornerRadius x:Key="PopupRadius">10</CornerRadius>
     <CornerRadius x:Key="TabRadius">15</CornerRadius>
 
@@ -62,11 +75,11 @@
     <FontFamily x:Key="UiFont">Bahnschrift SemiCondensed, Bahnschrift, Segoe UI</FontFamily>
     <sys:Double x:Key="GraphStroke">2.2</sys:Double>
 
-    <!-- Glow -->
-    <DropShadowEffect x:Key="LineGlow" Color="#FF9900" BlurRadius="10" ShadowDepth="0" Opacity="0.7" />
-    <DropShadowEffect x:Key="LineGlowCpu" Color="#FF9900" BlurRadius="16" ShadowDepth="0" Opacity="0.9" />
-    <DropShadowEffect x:Key="LineGlowMem" Color="#CC99FF" BlurRadius="16" ShadowDepth="0" Opacity="0.9" />
-    <DropShadowEffect x:Key="LineGlowGpu" Color="#99CCFF" BlurRadius="16" ShadowDepth="0" Opacity="0.9" />
+    <!-- Glow: LCARS is flat, so every line glow is off. -->
+    <DropShadowEffect x:Key="LineGlow" Color="#FF9900" BlurRadius="6" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#FF9900" BlurRadius="8" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#CC99FF" BlurRadius="8" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#99CCFF" BlurRadius="8" ShadowDepth="0" Opacity="0" />
 
     <!-- Area under each curve -->
     <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">

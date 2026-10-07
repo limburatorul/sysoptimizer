@@ -302,10 +302,11 @@ public partial class MainWindow
         int bridge = (int)(gapLimit / cols.Seconds);
         BridgeShortGaps(peaks, bridge);
         var accent = MetricColor();
-        // Colour follows height: the theme accent at rest, orange from ~70%, red near 100%.
+        // Colour follows height: the theme accent at rest, its warning colour from ~70%, its bad colour near 100%.
+        Color hot = ThemeColor("StatusBad", Hot), warm = ThemeColor("StatusWarn", Warm);
         LinearGradientBrush Heat(byte hotA, byte warmA, byte restA, byte floorA) => new(new GradientStopCollection
         {
-            new(Alpha(Hot, hotA), 0), new(Alpha(Warm, warmA), 0.3), new(Alpha(accent, restA), 0.5), new(Alpha(accent, floorA), 1),
+            new(Alpha(hot, hotA), 0), new(Alpha(warm, warmA), 0.3), new(Alpha(accent, restA), 0.5), new(Alpha(accent, floorA), 1),
         }, new Point(0, top), new Point(0, bottom)) { MappingMode = BrushMappingMode.Absolute };
         var areaPath = new Path { Data = SmoothRuns(peaks, cols, Y, baseline: bottom), Fill = Heat(0x66, 0x4A, 0x38, 0x00), IsHitTestVisible = false };
         var linePath = new Path
@@ -333,9 +334,14 @@ public partial class MainWindow
         // By the range on screen, not the saved setting: mid-drag the view is in the past while it says "follow now".
         if (DateTime.Now >= _historyFrom && DateTime.Now <= _historyTo.AddSeconds(30))
         {
+            // A quiet marker in the text colour, starting under the badge row: red is kept for heat, and the dot
+            // stays clear of the card's rounded corner.
             double nx = Math.Min(w - 1, X(DateTime.UtcNow));
-            c.Children.Add(new Line { X1 = nx, X2 = nx, Y1 = 4, Y2 = bottom, Stroke = new SolidColorBrush(Hot), StrokeThickness = 1.5 });
-            Place(c, new Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(Hot) }, nx - 3.5, 1);
+            var nowLine = new Line { X1 = nx, X2 = nx, Y1 = BadgeRow - 6, Y2 = bottom, StrokeThickness = 1, Opacity = 0.6, IsHitTestVisible = false };
+            nowLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextPrimary");
+            c.Children.Add(nowLine);
+            var nowDot = Place(c, new Ellipse { Width = 7, Height = 7, IsHitTestVisible = false }, Math.Min(nx - 3.5, w - 8), BadgeRow - 9.5);
+            nowDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "TextPrimary");
         }
 
         _cursorLine = new Line { Y1 = top - 4, Y2 = bottom, StrokeThickness = 1, Opacity = 0.45, StrokeDashArray = new DoubleCollection { 3, 3 }, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
@@ -344,14 +350,16 @@ public partial class MainWindow
 
         // A dot that rides the curve under the cursor, with the value beside it.
         _cursorDot = new Ellipse { Width = 9, Height = 9, Fill = new SolidColorBrush(accent), StrokeThickness = 2, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
-        _cursorDot.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "CardBackground");
+        _cursorDot.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Surface"); // CardBackground is transparent in some themes
         c.Children.Add(_cursorDot);
+        var cursorText = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold };
+        cursorText.SetResourceReference(TextBlock.ForegroundProperty, "OnAccent"); // white was unreadable on the lighter accents
         _cursorValue = new Border
         {
-            Background = new SolidColorBrush(Alpha(accent, 0xE6)), CornerRadius = new CornerRadius(5), Padding = new Thickness(6, 1, 6, 2),
-            Child = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White },
-            Visibility = Visibility.Collapsed, IsHitTestVisible = false,
+            Background = new SolidColorBrush(Alpha(accent, 0xE6)), Padding = new Thickness(6, 1, 6, 2),
+            Child = cursorText, Visibility = Visibility.Collapsed, IsHitTestVisible = false,
         };
+        _cursorValue.SetResourceReference(Border.CornerRadiusProperty, "PillRadius");
         c.Children.Add(_cursorValue);
         // A live refresh or a drag frame rebuilds the chart: put the pin (or the resting mouse's cursor) back.
         if (_pinnedUtc is DateTime pin && pin >= fromUtc && pin <= _historyTo.ToUniversalTime()) PlaceCursor(X(pin), pinned: true);
@@ -498,8 +506,12 @@ public partial class MainWindow
         // The colour is what marks the hot stretches.
         double Thick(float t) => Math.Clamp(t / 100 * (TempBand - 6), 3, TempBand - 6);
         // Colour on a fixed scale, so a stretch keeps its colour however the view moves (relative to what's on
-        // screen, scrolling a hot stretch away lit up the rest): cool up to 60 °C, coral by 78, red at 90.
-        (double At, Color Colour)[] scale = { (0, Cool), (0.6, Color.FromRgb(0xE9, 0x79, 0x5A)), (1, Hot) };
+        // screen, scrolling a hot stretch away lit up the rest): the theme's cool up to 60 °C, its warm by 78, its
+        // bad colour at 90. Alpha blends too, so a translucent cool lets normal temperatures recede.
+        (double At, Color Colour)[] scale =
+        {
+            (0, ThemeColor("TempCool", Cool)), (0.6, ThemeColor("TempWarm", Color.FromRgb(0xE9, 0x79, 0x5A))), (1, ThemeColor("StatusBad", Hot)),
+        };
         Color Shade(float t)
         {
             double f = Math.Clamp((t - 60) / 30, 0, 1);
@@ -508,9 +520,9 @@ public partial class MainWindow
                 {
                     double g = (f - scale[s - 1].At) / (scale[s].At - scale[s - 1].At);
                     Color a = scale[s - 1].Colour, b = scale[s].Colour;
-                    return Color.FromRgb((byte)(a.R + (b.R - a.R) * g), (byte)(a.G + (b.G - a.G) * g), (byte)(a.B + (b.B - a.B) * g));
+                    return Color.FromArgb((byte)(a.A + (b.A - a.A) * g), (byte)(a.R + (b.R - a.R) * g), (byte)(a.G + (b.G - a.G) * g), (byte)(a.B + (b.B - a.B) * g));
                 }
-            return Hot;
+            return scale[^1].Colour;
         }
 
         var geometry = new StreamGeometry();
@@ -559,12 +571,14 @@ public partial class MainWindow
         {
             double gx = Math.Clamp(x(g[0].Time), 10, w - 10);
             c.Children.Add(new Line { X1 = gx, X2 = gx, Y1 = 20, Y2 = bottom, Stroke = new SolidColorBrush(Alpha(accent, 0x50)), StrokeThickness = 1, IsHitTestVisible = false });
+            var count = new TextBlock { Text = g.Count.ToString(), FontSize = 11, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Center };
+            count.SetResourceReference(TextBlock.ForegroundProperty, "OnAccent");
             var badge = new Border
             {
-                Background = new SolidColorBrush(accent), CornerRadius = new CornerRadius(6), Padding = new Thickness(5, 1, 5, 1), MinWidth = 20,
-                Child = new TextBlock { Text = g.Count.ToString(), FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, TextAlignment = TextAlignment.Center },
-                ToolTip = string.Join("\n", g.Take(20).Select(e => $"{e.Time.ToLocalTime():HH:mm:ss}  {e.Detail}")) + (g.Count > 20 ? $"\n… and {g.Count - 20} more" : ""),
+                Background = new SolidColorBrush(accent), Padding = new Thickness(5, 1, 5, 1), MinWidth = 20, Child = count,
+                ToolTip =string.Join("\n", g.Take(20).Select(e => $"{e.Time.ToLocalTime():HH:mm:ss}  {e.Detail}")) + (g.Count > 20 ? $"\n… and {g.Count - 20} more" : ""),
             };
+            badge.SetResourceReference(Border.CornerRadiusProperty, "PillRadius"); // a capsule, or a hard tag in the square themes
             AutomationPropertiesName(badge, $"{g.Count} apps launched");
             badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Place(c, badge, gx - badge.DesiredSize.Width / 2, 2);
@@ -934,9 +948,10 @@ public partial class MainWindow
         _navSelection = new Border
         {
             Width = Math.Max(NavGrabWidth, realWidth), Height = h - 2,
-            BorderBrush = new SolidColorBrush(accent), BorderThickness = new Thickness(1.5), CornerRadius = new CornerRadius(4),
+            BorderBrush = new SolidColorBrush(accent), BorderThickness = new Thickness(1.5),
             Background = new SolidColorBrush(Alpha(accent, 0x22)), IsHitTestVisible = false,
         };
+        _navSelection.SetResourceReference(Border.CornerRadiusProperty, "ControlRadius");
         Place(c, _navSelection, Math.Clamp(X(_historyFrom) - (_navSelection.Width - realWidth) / 2, 0, Math.Max(0, w - _navSelection.Width)), 1);
 
         _navStartLabel = Label("", 9, "TextPrimary");

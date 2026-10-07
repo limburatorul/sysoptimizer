@@ -4,8 +4,8 @@
 
     <!-- Every theme dictionary defines the same keys; controls reference them with DynamicResource so a swap repaints live. -->
 
-    <!-- Surfaces and text -->
-    <SolidColorBrush x:Key="Surface" Color="#DB1E1E20" />
+    <!-- Surfaces and text: Surface is 72% opaque so the acrylic backdrop shows through; SurfaceElevated stays near-opaque for popups and the log panel -->
+    <SolidColorBrush x:Key="Surface" Color="#B81E1E20" />
     <SolidColorBrush x:Key="SurfaceElevated" Color="#F0222226" />
     <SolidColorBrush x:Key="Border" Color="#14FFFFFF" />
     <SolidColorBrush x:Key="CardBackground" Color="Transparent" />
@@ -28,6 +28,15 @@
     <SolidColorBrush x:Key="AccentMem" Color="#A78BFA" />
     <SolidColorBrush x:Key="AccentGpu" Color="#FBBF24" />
 
+    <!-- Good / warning / bad: the health score, and the warm and hot steps of the History heat ramp.
+         Picked to step away from the metric colors above. -->
+    <SolidColorBrush x:Key="StatusGood" Color="#22C55E" />
+    <SolidColorBrush x:Key="StatusWarn" Color="#F97316" />
+    <SolidColorBrush x:Key="StatusBad" Color="#EF4444" />
+    <!-- Temperature band under the History chart: a faint slate at rest (translucent, so normal heat recedes), coral by 78 °C, StatusBad at 90 °C -->
+    <SolidColorBrush x:Key="TempCool" Color="#4D9AA3B5" />
+    <SolidColorBrush x:Key="TempWarm" Color="#E9795A" />
+
     <!-- Tabs -->
     <SolidColorBrush x:Key="TabBackground" Color="Transparent" />
     <SolidColorBrush x:Key="TabBackgroundSelected" Color="Transparent" />
@@ -38,14 +47,18 @@
     <Thickness x:Key="TabMargin">0</Thickness>
     <Thickness x:Key="TabPadding">16,10</Thickness>
 
-    <!-- Buttons, pills, checkboxes -->
-    <SolidColorBrush x:Key="ButtonBackground" Color="#F0222226" />
+    <!-- Buttons, pills, checkboxes: Win11 control fill (6% white, raised above the surface) and a strong 54% check outline -->
+    <SolidColorBrush x:Key="ButtonBackground" Color="#0FFFFFFF" />
     <SolidColorBrush x:Key="ButtonForeground" Color="#EBFFFFFF" />
-    <SolidColorBrush x:Key="ButtonBorder" Color="#14FFFFFF" />
+    <SolidColorBrush x:Key="ButtonBorder" Color="#1FFFFFFF" />
     <SolidColorBrush x:Key="ButtonHoverBorder" Color="#4EA8FF" />
-    <SolidColorBrush x:Key="PillBackground" Color="#F0222226" />
+    <SolidColorBrush x:Key="PillBackground" Color="#14FFFFFF" />
     <SolidColorBrush x:Key="PillForeground" Color="#99FFFFFF" />
-    <SolidColorBrush x:Key="CheckBorder" Color="#14FFFFFF" />
+    <!-- Checked pill: solid accent, like the primary button -->
+    <SolidColorBrush x:Key="PillBackgroundSelected" Color="#4EA8FF" />
+    <SolidColorBrush x:Key="PillBorderSelected" Color="#4EA8FF" />
+    <SolidColorBrush x:Key="PillForegroundSelected" Color="#0F0F10" />
+    <SolidColorBrush x:Key="CheckBorder" Color="#8BFFFFFF" />
     <Thickness x:Key="ControlBorderThickness">1</Thickness>
 
     <!-- Shape -->
@@ -60,27 +73,27 @@
     <FontFamily x:Key="UiFont">Segoe UI Variable, Segoe UI</FontFamily>
     <sys:Double x:Key="GraphStroke">1.5</sys:Double>
 
-    <!-- Glow — the graph lines carry a glow in their own color -->
-    <DropShadowEffect x:Key="LineGlow" Color="#4EA8FF" BlurRadius="12" ShadowDepth="0" Opacity="0.9" />
-    <DropShadowEffect x:Key="LineGlowCpu" Color="#4EA8FF" BlurRadius="18" ShadowDepth="0" Opacity="1" />
-    <DropShadowEffect x:Key="LineGlowMem" Color="#A78BFA" BlurRadius="18" ShadowDepth="0" Opacity="1" />
-    <DropShadowEffect x:Key="LineGlowGpu" Color="#FBBF24" BlurRadius="18" ShadowDepth="0" Opacity="1" />
+    <!-- Glow — a faint bloom in each line's own color, kept quiet like native Windows 11 charts -->
+    <DropShadowEffect x:Key="LineGlow" Color="#4EA8FF" BlurRadius="8" ShadowDepth="0" Opacity="0.35" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#4EA8FF" BlurRadius="10" ShadowDepth="0" Opacity="0.45" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#A78BFA" BlurRadius="10" ShadowDepth="0" Opacity="0.45" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#FBBF24" BlurRadius="10" ShadowDepth="0" Opacity="0.45" />
 
     <!-- Area under each curve -->
     <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#664EA8FF" Offset="0" />
+        <GradientStop Color="#474EA8FF" Offset="0" />
         <GradientStop Color="#004EA8FF" Offset="1" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AreaFillCpu" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#664EA8FF" Offset="0" />
+        <GradientStop Color="#474EA8FF" Offset="0" />
         <GradientStop Color="#004EA8FF" Offset="1" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AreaFillMem" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#66A78BFA" Offset="0" />
+        <GradientStop Color="#47A78BFA" Offset="0" />
         <GradientStop Color="#00A78BFA" Offset="1" />
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AreaFillGpu" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#66FBBF24" Offset="0" />
+        <GradientStop Color="#47FBBF24" Offset="0" />
         <GradientStop Color="#00FBBF24" Offset="1" />
     </LinearGradientBrush>
 

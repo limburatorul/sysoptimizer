@@ -47,7 +47,7 @@ public static class ThemeManager
         new("Glass", "Glass", false),
         new("StarTrek", "Star Trek", true, (0x000000, 0x0099FF, 0x0099FF)),
         new("StarCraft", "StarCraft", true, (0x120B07, 0xE6DDCF, 0x4D3A26)),
-        new("Cyberpunk", "Cyberpunk", true, (0x0E0A0A, 0x0AEEFC, 0x0AEEFC)),
+        new("Cyberpunk", "Cyberpunk", true, (0x0E0A0A, 0xDAE9EC, 0x0AEEFC)), // title in TextPrimary, like the caption buttons beside it
     };
 
     public static ThemeInfo Current { get; private set; } = Themes[0];

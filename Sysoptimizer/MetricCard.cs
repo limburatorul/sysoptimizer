@@ -29,8 +29,10 @@ public class MetricCard
 
     public static MetricCard Build(string title, string speedLabel, string latencyLabel)
     {
-        var (speedGraph, speedLine, speedFill) = BuildGraph();
-        var (latencyGraph, latencyLine, latencyFill) = BuildGraph();
+        // The graph colors, not the accent: in Cyberpunk the accent is the yellow of everything you can press,
+        // and two different colors keep the stacked graphs apart.
+        var (speedGraph, speedLine, speedFill) = BuildGraph("AccentCpu", "AreaFillCpu", "LineGlowCpu");
+        var (latencyGraph, latencyLine, latencyFill) = BuildGraph("AccentMem", "AreaFillMem", "LineGlowMem");
 
         var speedValueText = Ref(new TextBlock { FontSize = 11 }, TextBlock.ForegroundProperty, "TextSecondary");
         var latencyValueText = Ref(new TextBlock { FontSize = 11 }, TextBlock.ForegroundProperty, "TextSecondary");

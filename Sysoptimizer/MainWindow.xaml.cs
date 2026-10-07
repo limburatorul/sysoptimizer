@@ -82,6 +82,8 @@ public partial class MainWindow : Window
         ApplyRoundedClip(CpuCardBorder);
         ApplyRoundedClip(MemCardBorder);
         ApplyRoundedClip(GpuCardBorder);
+        ApplyRoundedClip(HistoryChartBorder);
+        ApplyRoundedClip(HistoryNavigatorBorder);
         CpuThreadsGrid.SizeChanged += (_, e) => { if (e.WidthChanged) LayoutCpuThreads(); };
 
         InitMonitoring();
@@ -336,6 +338,7 @@ public partial class MainWindow : Window
         content.Children.Add(header);
         var cell = new System.Windows.Controls.Border { Child = content, Height = 76, Margin = new Thickness(3), BorderThickness = new Thickness(1), ClipToBounds = true };
         cell.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Border");
+        cell.SetResourceReference(System.Windows.Controls.Border.CornerRadiusProperty, "ControlRadius");
         CpuThreadsGrid.Children.Add(cell);
         LayoutCpuThreads();
         _liveGraphs.Add(new GraphBinding { Container = graph, Line = line, Fill = fill, History = history, AutoScale = false, ShowAxis = false });
@@ -512,7 +515,7 @@ public partial class MainWindow : Window
             g.GridLines[i].Visibility = g.GridLabels![i].Visibility = Visibility.Visible;
             g.GridLines[i].X1 = 0; g.GridLines[i].X2 = width; g.GridLines[i].Y1 = y; g.GridLines[i].Y2 = y;
             double value = max * (1 - AxisFractions[i]);
-            g.GridLabels![i].Text = autoScale ? $"{value:0}" : $"{value:0}%";
+            g.GridLabels![i].Text = autoScale ? $"{value:0.#}" : $"{value:0}%"; // an idle 1 MB/s scale read "1, 1, 0"
             g.GridLabels[i].Margin = new Thickness(0, Math.Clamp(y - 7, topInset, height - 14), 8, 0);
         }
     }
@@ -724,11 +727,10 @@ public partial class MainWindow : Window
     {
         var report = await Task.Run(HealthService.Check);
         HealthScoreText.Text = $"{report.Score}";
-        var color = report.Score >= 75 ? Color.FromRgb(0x22, 0xC5, 0x5E)
-                  : report.Score >= 35 ? Color.FromRgb(0xF9, 0x73, 0x16)
-                  : Color.FromRgb(0xEF, 0x44, 0x44);
-        HealthScoreText.Foreground = new SolidColorBrush(color);
-        HealthCardBorder.BorderBrush = new SolidColorBrush(color);
+        // Theme keys, not fixed colors: each palette has its own good / warn / bad, and a theme switch repaints them.
+        string key = report.Score >= 75 ? "StatusGood" : report.Score >= 35 ? "StatusWarn" : "StatusBad";
+        HealthScoreText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, key);
+        HealthCardBorder.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, key);
         HealthIssuesList.ItemsSource = report.Issues;
     }
 
@@ -901,6 +903,7 @@ public partial class MainWindow : Window
     private void OnThemeChanged()
     {
         WindowGlass.ApplyChrome(this);
+        if (_updateDialog != null) WindowGlass.ApplyChrome(_updateDialog); // modeless: it can be open across a switch
         // The corner radius is a resource reference; wait for it to settle before re-cutting the clips.
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => _clipUpdaters.ForEach(update => update()));
     }

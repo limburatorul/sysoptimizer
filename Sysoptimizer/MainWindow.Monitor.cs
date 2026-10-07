@@ -37,8 +37,8 @@ public partial class MainWindow
         {
             if (e.Source != Tabs) return; // SelectionChanged bubbles up from every ComboBox inside the tabs too
             if (Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "History" }) { _animateChart = true; _ = LoadHistory(); }
-            if (Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "Privacy" }) RefreshPrivacy();
         };
+        PrivacyList.IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) RefreshPrivacy(); }; // a pill under Processes
         InitHistory();
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;

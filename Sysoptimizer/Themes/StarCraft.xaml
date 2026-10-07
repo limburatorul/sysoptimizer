@@ -19,12 +19,12 @@
     <SolidColorBrush x:Key="LogForeground" Color="#FF9CCDB4" />
 
     <!-- Accent -->
-    <SolidColorBrush x:Key="Accent" Color="#FF4FB3D1" />
+    <SolidColorBrush x:Key="Accent" Color="#FF3E9DBA" />
     <SolidColorBrush x:Key="AccentDim" Color="#444FB3D1" />
     <SolidColorBrush x:Key="OnAccent" Color="#FF02121A" />
 
     <!-- Scrollbar -->
-    <SolidColorBrush x:Key="ScrollThumb" Color="#FF2F4A60" />
+    <SolidColorBrush x:Key="ScrollThumb" Color="#FF44637C" />
     <SolidColorBrush x:Key="ScrollThumbHover" Color="#B04FB3D1" />
     <SolidColorBrush x:Key="ScrollThumbActive" Color="#FF4FB3D1" />
 
@@ -33,6 +33,15 @@
     <SolidColorBrush x:Key="AccentMem" Color="#FF6CC48A" />
     <SolidColorBrush x:Key="AccentGpu" Color="#FFD9A441" />
 
+    <!-- Good / warning / bad: the health score, and the warm and hot steps of the History heat ramp.
+         Picked to step away from the metric colors above. -->
+    <SolidColorBrush x:Key="StatusGood" Color="#FF6CC48A" />
+    <SolidColorBrush x:Key="StatusWarn" Color="#FFE08A3C" />
+    <SolidColorBrush x:Key="StatusBad" Color="#FFD9534F" />
+    <!-- Temperature band under the History chart: quiet steel at rest, heated-metal orange by 78 °C, StatusBad at 90 °C -->
+    <SolidColorBrush x:Key="TempCool" Color="#995A6B78" />
+    <SolidColorBrush x:Key="TempWarm" Color="#FFC8703A" />
+
     <!-- Tabs: flat steel plates, the open one lit with a cyan edge -->
     <SolidColorBrush x:Key="TabBackground" Color="#FF0E1724" />
     <SolidColorBrush x:Key="TabBackgroundSelected" Color="#FF1A2C3D" />
@@ -40,7 +49,7 @@
     <SolidColorBrush x:Key="TabForegroundSelected" Color="#FFCFDDE6" />
     <SolidColorBrush x:Key="TabIndicator" Color="#FF4FB3D1" />
     <Thickness x:Key="TabIndicatorThickness">0,0,0,2</Thickness>
-    <Thickness x:Key="TabMargin">0,0,2,0</Thickness>
+    <Thickness x:Key="TabMargin">0,6,2,0</Thickness>
     <Thickness x:Key="TabPadding">13,10</Thickness>
 
     <!-- Buttons, pills, checkboxes -->
@@ -53,7 +62,11 @@
     <SolidColorBrush x:Key="ButtonHoverBorder" Color="#FF4FB3D1" />
     <SolidColorBrush x:Key="PillBackground" Color="#FF0E1724" />
     <SolidColorBrush x:Key="PillForeground" Color="#FF7C93A3" />
-    <SolidColorBrush x:Key="CheckBorder" Color="#FF2F4A60" />
+    <!-- Checked pill: a dark plate with a lit edge, like the open tab, not a solid block -->
+    <SolidColorBrush x:Key="PillBackgroundSelected" Color="#FF1B3A50" />
+    <SolidColorBrush x:Key="PillBorderSelected" Color="#FF4FB3D1" />
+    <SolidColorBrush x:Key="PillForegroundSelected" Color="#FFE6F4FA" />
+    <SolidColorBrush x:Key="CheckBorder" Color="#FF4A6780" />
     <Thickness x:Key="ControlBorderThickness">1</Thickness>
 
     <!-- Shape: hard corners -->

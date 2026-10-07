@@ -5,16 +5,66 @@
     <!-- Control templates shared by every theme. Colors, radii, weights and the font come from the
          active Themes/*.xaml through DynamicResource, so switching theme repaints without a restart. -->
 
+    <!-- Keyboard focus cue: the default is a black dotted line, invisible on every theme's dark surface -->
+    <Style x:Key="ThemedFocus">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="-2" BorderBrush="{DynamicResource Accent}" BorderThickness="1.5"
+                            CornerRadius="{DynamicResource ControlRadius}" SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The same cue for shapes that aren't ControlRadius boxes: a pill gets a capsule, a tab a ring on its
+         plate (inside the tab's margin, clear of the title bar and the divider under the strip). -->
+    <Style x:Key="PillFocus">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="-2" BorderBrush="{DynamicResource Accent}" BorderThickness="1.5"
+                            CornerRadius="{DynamicResource PillRadius}" SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="TabFocus">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="{DynamicResource TabMargin}" BorderBrush="{DynamicResource Accent}" BorderThickness="1.5"
+                            CornerRadius="{DynamicResource TabRadius}" SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A label that follows the theme's casing (UPPERCASE in the HUD themes): put the words in Tag -->
+    <Style x:Key="CaseLabel" TargetType="TextBlock">
+        <Setter Property="Text">
+            <Setter.Value>
+                <MultiBinding Converter="{x:Static local:CaseConverter.Instance}">
+                    <Binding RelativeSource="{RelativeSource Self}" Path="Tag" />
+                    <Binding Source="{x:Static local:ThemeState.Instance}" Path="UpperCase" />
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Duration / theme pills -->
     <Style x:Key="PillToggle" TargetType="ToggleButton">
         <Setter Property="Foreground" Value="{DynamicResource PillForeground}" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource PillFocus}" />
+        <!-- Natural height even in a row of taller buttons, so a pill stays a pill -->
+        <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Padding" Value="12,4" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bd" Background="{DynamicResource PillBackground}" BorderBrush="{DynamicResource Border}"
+                    <Border x:Name="Bd" Background="{DynamicResource PillBackground}" BorderBrush="{DynamicResource ButtonBorder}"
                             BorderThickness="1" CornerRadius="{DynamicResource PillRadius}" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center">
                             <ContentPresenter.Content>
@@ -27,9 +77,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Accent}" />
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
-                            <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PillBackgroundSelected}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource PillBorderSelected}" />
+                            <Setter Property="Foreground" Value="{DynamicResource PillForegroundSelected}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -133,6 +183,7 @@
         <Setter Property="BorderThickness" Value="{DynamicResource ControlBorderThickness}" />
         <Setter Property="Padding" Value="14,8" />
         <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemedFocus}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -173,6 +224,7 @@
     <Style TargetType="CheckBox">
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         <Setter Property="Padding" Value="8,0,0,0" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemedFocus}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="CheckBox">
@@ -205,13 +257,16 @@
         <!-- The tab's page inherits Foreground from the TabItem, so the label color lives on the label presenter instead. -->
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         <Setter Property="Padding" Value="{DynamicResource TabPadding}" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource TabFocus}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
-                    <Border x:Name="Bd" Background="{DynamicResource TabBackground}" BorderBrush="{DynamicResource TabIndicator}"
-                            BorderThickness="0" CornerRadius="{DynamicResource TabRadius}" Margin="{DynamicResource TabMargin}"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter x:Name="Label" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    <!-- The plate and its glow sit behind the label, not around it: an effect on the label's
+                         ancestor blurs the text and drops ClearType. -->
+                    <Grid Margin="{DynamicResource TabMargin}">
+                        <Border x:Name="Bd" Background="{DynamicResource TabBackground}" BorderBrush="{DynamicResource TabIndicator}"
+                                BorderThickness="0" CornerRadius="{DynamicResource TabRadius}" />
+                        <ContentPresenter x:Name="Label" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"
                                           TextElement.Foreground="{DynamicResource TabForeground}">
                             <ContentPresenter.Content>
                                 <MultiBinding Converter="{x:Static local:CaseConverter.Instance}">
@@ -220,7 +275,7 @@
                                 </MultiBinding>
                             </ContentPresenter.Content>
                         </ContentPresenter>
-                    </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="Label" Property="TextElement.Foreground" Value="{DynamicResource TabForegroundSelected}" />
@@ -279,6 +334,7 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="12,6" />
         <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{StaticResource ThemedFocus}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
@@ -316,6 +372,76 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- TextBox: the stock one is a white box on every theme -->
+    <Style TargetType="TextBox">
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevated}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CheckBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource Accent}" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource ControlRadius}">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource ButtonHoverBorder}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ToolTip: the system one is a light box popping over the dark chart -->
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevated}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
+        <Setter Property="MaxWidth" Value="360" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource PopupRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter>
+                            <ContentPresenter.Resources>
+                                <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap" /></Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ContextMenu: TextBox's built-in Cut/Copy/Paste menu is otherwise light -->
+    <Style TargetType="ContextMenu">
+        <Setter Property="Background" Value="{DynamicResource SurfaceElevated}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
+        <Style.Resources>
+            <Style TargetType="MenuItem">
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            </Style>
+        </Style.Resources>
     </Style>
 
     <Style TargetType="ProgressBar">

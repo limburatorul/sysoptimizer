@@ -30,7 +30,7 @@
                 <TabItem Header="Resources">
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                         <StackPanel Margin="16">
-                            <Border x:Name="HealthCardBorder" Padding="20" Margin="0,0,0,16" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="2">
+                            <Border x:Name="HealthCardBorder" Padding="20" Margin="0,0,0,16" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" x:Name="OptimizeNowButton" Content="Optimize now" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" Click="OptimizeNow_Click" />
                                     <StackPanel VerticalAlignment="Center">
@@ -51,7 +51,7 @@
                                 </DockPanel>
                             </Border>
                             <DockPanel Margin="0,0,0,12">
-                                <TextBlock DockPanel.Dock="Left" Text="Show last" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
+                                <TextBlock DockPanel.Dock="Left" Style="{StaticResource CaseLabel}" Tag="Show last" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
                                     <RadioButton Content="30s" GroupName="Duration" Tag="30" Style="{StaticResource PillToggle}" Checked="DurationPill_Checked" />
                                     <RadioButton Content="1m" GroupName="Duration" Tag="60" Style="{StaticResource PillToggle}" IsChecked="True" Margin="6,0,0,0" Checked="DurationPill_Checked" />
@@ -107,61 +107,78 @@
                 </TabItem>
 
                 <TabItem Header="Processes">
-                    <DockPanel Margin="16">
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <TextBlock Text="Sort by" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
-                                <RadioButton Content="CPU" GroupName="ProcessSort" Tag="cpu" Style="{StaticResource PillToggle}" IsChecked="True" Checked="ProcessSort_Checked" />
-                                <RadioButton Content="Memory" GroupName="ProcessSort" Tag="ram" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="ProcessSort_Checked" />
-                                <RadioButton Content="GPU" GroupName="ProcessSort" Tag="gpu" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="ProcessSort_Checked" />
-                            </StackPanel>
-                            <TextBlock Text="Filter" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
-                            <TextBox x:Name="ProcessFilterBox" Width="220" HorizontalAlignment="Left" VerticalContentAlignment="Center" TextChanged="ProcessFilter_Changed" />
-                        </DockPanel>
-                        <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                            <StackPanel x:Name="BlockedPanel" Visibility="Collapsed" Margin="0,0,0,8">
-                                <TextBlock Text="BLOCKED APPS" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4" />
-                                <ItemsControl x:Name="BlockedList">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <CheckBox IsChecked="{Binding IsChecked}" Margin="0,2">
-                                                <TextBlock Text="{Binding Name}" />
-                                            </CheckBox>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <Button x:Name="UnblockButton" Content="Unblock selected" Click="UnblockApps_Click" Margin="0,0,8,0" Visibility="Collapsed" />
-                                <Button Content="Block from starting" Click="BlockApps_Click" Margin="0,0,8,0" />
-                                <Button Content="End task" Style="{StaticResource PrimaryButton}" Click="EndTask_Click" />
-                            </StackPanel>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
+                            <RadioButton Content="Running" GroupName="ProcessesPages" Tag="{Binding ElementName=RunningPage}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" />
+                            <RadioButton Content="Privacy" GroupName="ProcessesPages" Tag="{Binding ElementName=PrivacyPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                         </StackPanel>
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,14,4">
-                            <TextBlock DockPanel.Dock="Right" Text="GPU" Width="60" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                            <TextBlock DockPanel.Dock="Right" Text="MEMORY" Width="90" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                            <TextBlock DockPanel.Dock="Right" Text="CPU" Width="60" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                            <TextBlock x:Name="ProcessCountText" Text="APP" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                        </DockPanel>
-                        <ItemsControl x:Name="ProcessesList" Style="{StaticResource VirtualList}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,6">
-                                        <DockPanel>
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding GpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding RamText}" Width="90" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding CpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
-                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                            </CheckBox>
-                                        </DockPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        <Grid>
+                            <Border x:Name="RunningPage">
+                                <DockPanel Margin="16">
+                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource CaseLabel}" Tag="Sort by" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
+                                            <RadioButton Content="CPU" GroupName="ProcessSort" Tag="cpu" Style="{StaticResource PillToggle}" IsChecked="True" Checked="ProcessSort_Checked" />
+                                            <RadioButton Content="Memory" GroupName="ProcessSort" Tag="ram" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="ProcessSort_Checked" />
+                                            <RadioButton Content="GPU" GroupName="ProcessSort" Tag="gpu" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="ProcessSort_Checked" />
+                                        </StackPanel>
+                                        <TextBlock Style="{StaticResource CaseLabel}" Tag="Filter" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
+                                        <TextBox x:Name="ProcessFilterBox" Width="220" HorizontalAlignment="Left" VerticalAlignment="Center" VerticalContentAlignment="Center" TextChanged="ProcessFilter_Changed" />
+                                    </DockPanel>
+                                    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                                        <StackPanel x:Name="BlockedPanel" Visibility="Collapsed" Margin="0,0,0,8">
+                                            <TextBlock Text="BLOCKED APPS" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                            <ItemsControl x:Name="BlockedList">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox IsChecked="{Binding IsChecked}" Margin="0,2">
+                                                            <TextBlock Text="{Binding Name}" />
+                                                        </CheckBox>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button x:Name="UnblockButton" Content="Unblock selected" Click="UnblockApps_Click" Margin="0,0,8,0" Visibility="Collapsed" />
+                                            <Button Content="Block from starting" Click="BlockApps_Click" Margin="0,0,8,0" />
+                                            <Button Content="End task" Style="{StaticResource PrimaryButton}" Click="EndTask_Click" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,14,4">
+                                        <TextBlock DockPanel.Dock="Right" Text="GPU" Width="60" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                        <TextBlock DockPanel.Dock="Right" Text="MEMORY" Width="90" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                        <TextBlock DockPanel.Dock="Right" Text="CPU" Width="60" TextAlignment="Right" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                        <TextBlock x:Name="ProcessCountText" Text="APP" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                    </DockPanel>
+                                    <ItemsControl x:Name="ProcessesList" Style="{StaticResource VirtualList}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,6">
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding GpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding RamText}" Width="90" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding CpuText}" Width="60" TextAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" />
+                                                        <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                        </CheckBox>
+                                                    </DockPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="PrivacyPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12"
+                                               Text="Apps that used your camera, microphone or location, from the log Windows keeps for its privacy indicator. Updates every few seconds while this page is open." />
+                                    <ItemsControl x:Name="PrivacyList" Style="{StaticResource VirtualList}" ItemTemplate="{StaticResource HistoryRowTemplate}" />
+                                </DockPanel>
+                            </Border>
+                        </Grid>
                     </DockPanel>
                 </TabItem>
 
@@ -176,9 +193,9 @@
                                 <RadioButton Content="24h" GroupName="HistoryRange" Tag="24" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
                                 <RadioButton Content="3d" GroupName="HistoryRange" Tag="72" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
                                 <RadioButton Content="7d" GroupName="HistoryRange" Tag="168" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryRange_Checked" />
-                                <Button Content="◀" Click="HistoryPrev_Click" Margin="12,0,0,0" ToolTip="Earlier" AutomationProperties.Name="Earlier" />
-                                <Button Content="▶" Click="HistoryNext_Click" Margin="6,0,0,0" ToolTip="Later" AutomationProperties.Name="Later" />
-                                <Button Content="Now" Click="HistoryNow_Click" Margin="6,0,0,0" />
+                                <Button Content="&#xE76B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Padding="12,4" FontSize="11" VerticalAlignment="Center" Click="HistoryPrev_Click" Margin="12,0,0,0" ToolTip="Earlier" AutomationProperties.Name="Earlier" />
+                                <Button Content="&#xE76C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Padding="12,4" FontSize="11" VerticalAlignment="Center" Click="HistoryNext_Click" Margin="6,0,0,0" ToolTip="Later" AutomationProperties.Name="Later" />
+                                <Button Content="Now" Padding="12,4" FontSize="11" VerticalAlignment="Center" Click="HistoryNow_Click" Margin="6,0,0,0" />
                                 <RadioButton Content="CPU" GroupName="HistoryMetric" Tag="cpu" Style="{StaticResource PillToggle}" IsChecked="True" Margin="16,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="Memory" GroupName="HistoryMetric" Tag="mem" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="GPU" GroupName="HistoryMetric" Tag="gpu" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
@@ -191,7 +208,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <DockPanel>
-                                <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextWrapping="Wrap" />
                                 <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                     <ItemsControl x:Name="HistoryCursorList" ItemTemplate="{StaticResource HistoryRowTemplate}" />
                                 </ScrollViewer>
@@ -221,13 +238,13 @@
                                 <ComboBoxItem Content="Keep 6 months (~180 MB)" Tag="180" />
                                 <ComboBoxItem Content="Keep 1 year (~370 MB)" Tag="365" />
                             </ComboBox>
-                            <Border Margin="8,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
+                            <Border x:Name="HistoryNavigatorBorder" Margin="8,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                                 <Canvas x:Name="HistoryNavigator" Background="Transparent" Cursor="Hand" ToolTip="Drag to move through the history"
                                         MouseLeftButtonDown="Navigator_MouseDown" MouseMove="Navigator_MouseMove" MouseLeftButtonUp="Navigator_MouseUp" />
                             </Border>
                         </DockPanel>
                         <Canvas x:Name="HistoryAxis" DockPanel.Dock="Bottom" Height="16" Margin="0,4,0,0" ClipToBounds="True" />
-                        <Border CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
+                        <Border x:Name="HistoryChartBorder" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                             <Grid>
                                 <Canvas x:Name="HistoryChart" Background="Transparent" Cursor="Cross"
                                         MouseMove="HistoryChart_MouseMove" MouseLeave="HistoryChart_MouseLeave" MouseLeftButtonDown="HistoryChart_MouseDown" MouseLeftButtonUp="HistoryChart_MouseUp" MouseWheel="HistoryChart_MouseWheel"
@@ -240,7 +257,7 @@
 
                 <TabItem Header="Disks">
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                        <ItemsControl x:Name="DiskCardsHost" Margin="16">
+                        <ItemsControl x:Name="DiskCardsHost" Margin="16,16,4,4" VerticalAlignment="Top">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <UniformGrid Columns="2" />
@@ -265,7 +282,7 @@
                             </DockPanel>
                         </StackPanel>
                         <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="NetCardsHost">
+                            <ItemsControl x:Name="NetCardsHost" VerticalAlignment="Top">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <UniformGrid Columns="2" />
@@ -281,8 +298,11 @@
                         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
                             <RadioButton Content="Cleanup" GroupName="OptimizePages" Tag="{Binding ElementName=CleanupPage}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" />
                             <RadioButton Content="Tweaks" GroupName="OptimizePages" Tag="{Binding ElementName=TweaksPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
+                            <RadioButton Content="Startup" GroupName="OptimizePages" Tag="{Binding ElementName=StartupPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
+                            <RadioButton Content="Services" GroupName="OptimizePages" Tag="{Binding ElementName=ServicesPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                             <RadioButton Content="Debloat" GroupName="OptimizePages" Tag="{Binding ElementName=DebloatPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                             <RadioButton Content="Uninstall" GroupName="OptimizePages" Tag="{Binding ElementName=UninstallPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
+                            <RadioButton Content="Install" GroupName="OptimizePages" Tag="{Binding ElementName=InstallPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                         </StackPanel>
                         <Grid>
                             <Border x:Name="CleanupPage">
@@ -330,6 +350,60 @@
                                                     <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
                                                         <DockPanel>
                                                             <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource Accent}" VerticalAlignment="Top" FontSize="11" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="StartupPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Enable selected" Click="EnableStartup_Click" Margin="0,0,8,0" />
+                                        <Button Content="Disable selected" Style="{StaticResource PrimaryButton}" Click="DisableStartup_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="StartupList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
+                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                            </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="ServicesPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Re-enable selected" Click="EnableServices_Click" Margin="0,0,8,0" />
+                                        <Button Content="Stop and disable selected" Style="{StaticResource PrimaryButton}" Click="DisableServices_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="ServicesList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
                                                             <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
                                                                 <StackPanel>
                                                                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
@@ -411,6 +485,31 @@
                                                                 </StackPanel>
                                                             </CheckBox>
                                                         </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="InstallPage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="Update all (winget)" Click="UpgradeAll_Click" Margin="0,0,8,0" />
+                                        <Button Content="Install selected" Style="{StaticResource PrimaryButton}" Click="InstallApps_Click" />
+                                    </StackPanel>
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="AppsList">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}"
+                                                            Padding="10" Margin="0,0,10,10" Width="220">
+                                                        <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Name}" />
                                                     </Border>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
@@ -500,105 +599,6 @@
                     </DockPanel>
                 </TabItem>
 
-                <TabItem Header="Startup">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
-                            <RadioButton Content="Startup apps" GroupName="StartupPages" Tag="{Binding ElementName=StartupPage}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" />
-                            <RadioButton Content="Services" GroupName="StartupPages" Tag="{Binding ElementName=ServicesPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
-                        </StackPanel>
-                        <Grid>
-                            <Border x:Name="StartupPage">
-                                <DockPanel Margin="16">
-                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                                        <Button Content="Enable selected" Click="EnableStartup_Click" Margin="0,0,8,0" />
-                                        <Button Content="Disable selected" Style="{StaticResource PrimaryButton}" Click="DisableStartup_Click" />
-                                    </StackPanel>
-                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                                        <ItemsControl x:Name="StartupList">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                                        <DockPanel>
-                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
-                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                                <StackPanel>
-                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                                                </StackPanel>
-                                                            </CheckBox>
-                                                        </DockPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </DockPanel>
-                            </Border>
-                            <Border x:Name="ServicesPage" Visibility="Collapsed">
-                                <DockPanel Margin="16">
-                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                                        <Button Content="Re-enable selected" Click="EnableServices_Click" Margin="0,0,8,0" />
-                                        <Button Content="Stop and disable selected" Style="{StaticResource PrimaryButton}" Click="DisableServices_Click" />
-                                    </StackPanel>
-                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                                        <ItemsControl x:Name="ServicesList">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,10">
-                                                        <DockPanel>
-                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Top" />
-                                                            <CheckBox IsChecked="{Binding IsChecked}" AutomationProperties.Name="{Binding Name}">
-                                                                <StackPanel>
-                                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                                                </StackPanel>
-                                                            </CheckBox>
-                                                        </DockPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </DockPanel>
-                            </Border>
-                        </Grid>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Apps">
-                    <DockPanel Margin="16">
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Update all (winget)" Click="UpgradeAll_Click" Margin="0,0,8,0" />
-                            <Button Content="Install selected" Style="{StaticResource PrimaryButton}" Click="InstallApps_Click" />
-                        </StackPanel>
-                        <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                            <ItemsControl x:Name="AppsList">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}"
-                                                Padding="10" Margin="0,0,10,10" Width="220">
-                                            <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Name}" />
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Privacy">
-                    <DockPanel Margin="16">
-                        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12"
-                                   Text="Apps that used your camera, microphone or location, from the log Windows keeps for its privacy indicator. Updates every few seconds while this tab is open." />
-                        <ItemsControl x:Name="PrivacyList" Style="{StaticResource VirtualList}" ItemTemplate="{StaticResource HistoryRowTemplate}" />
-                    </DockPanel>
-                </TabItem>
-
                 <TabItem Header="About">
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                         <StackPanel Margin="16" MaxWidth="640" HorizontalAlignment="Left">
@@ -657,8 +657,8 @@
             <DockPanel Margin="16,10">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Log" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
-                        <TextBlock Text="Theme" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
+                        <TextBlock Style="{StaticResource CaseLabel}" Tag="Log" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                        <TextBlock Style="{StaticResource CaseLabel}" Tag="Theme" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
                         <RadioButton x:Name="ThemeGlass" Content="Glass" GroupName="Theme" Tag="Glass" Style="{StaticResource PillToggle}" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeStarTrek" Content="Star Trek" GroupName="Theme" Tag="StarTrek" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeStarCraft" Content="StarCraft" GroupName="Theme" Tag="StarCraft" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
