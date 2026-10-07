@@ -183,8 +183,6 @@
                                 <RadioButton Content="Memory" GroupName="HistoryMetric" Tag="mem" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="GPU" GroupName="HistoryMetric" Tag="gpu" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                             </StackPanel>
-                            <CheckBox x:Name="BackgroundCheck" Content="Record in background" Style="{StaticResource PillToggle}" Click="BackgroundCheck_Click" HorizontalAlignment="Right"
-                                      ToolTip="Start with Windows, hidden in the tray, so the history has no gaps" />
                         </DockPanel>
                         <Grid DockPanel.Dock="Bottom" Height="160" Margin="0,10,0,0">
                             <Grid.ColumnDefinitions>

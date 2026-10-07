@@ -43,20 +43,18 @@ public partial class MainWindow
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
 
-        BackgroundCheck.IsChecked = BackgroundMode.Enabled;
-        if (BackgroundMode.Enabled)
-        {
-            SetupTray();
-            // Re-point the logon task at this exe: an install or update may have moved it since it was made.
-            // Never from a Debug build: a test run would capture the task, and logon (and the updater's
-            // restart) would then keep launching that stale dev exe instead of the installed one.
+        // Recording is always on: Sysoptimizer starts with Windows into the tray, and closing the window only
+        // hides it there. Exit in the tray menu stops it; an update's Application.Shutdown closes it too.
+        SetupTray();
+        // Point the logon task at this exe on every start: an install or update may have moved it since.
+        // Never from a Debug build: a test run would capture the task, and logon (and the updater's
+        // restart) would then keep launching that stale dev exe instead of the installed one.
 #if !DEBUG
-            Task.Run(BackgroundMode.Enable);
+        Task.Run(() => { if (BackgroundMode.Register() is { } error) Dispatcher.Invoke(() => Log($"Couldn't set up starting with Windows — {error}")); });
 #endif
-        }
         Closing += (_, e) =>
         {
-            if (_exiting || !BackgroundMode.Enabled) return;
+            if (_exiting) return;
             e.Cancel = true; // keep recording; the tray icon brings it back
             Hide();
         };
@@ -297,24 +295,6 @@ public partial class MainWindow
         _exiting = true;
         Close();
         System.Windows.Application.Current.Shutdown();
-    }
-
-    private void BackgroundCheck_Click(object sender, RoutedEventArgs e)
-    {
-        if (BackgroundCheck.IsChecked == true)
-        {
-            string? error = BackgroundMode.Enable();
-            if (error != null) { BackgroundCheck.IsChecked = false; Log($"Couldn't set up background recording — {error}"); return; }
-            SetupTray();
-            Log("Background recording on: Sysoptimizer starts with Windows in the tray. Closing the window now hides it there.");
-        }
-        else
-        {
-            BackgroundMode.Disable();
-            _tray?.Dispose();
-            _tray = null;
-            Log("Background recording off: Sysoptimizer no longer starts with Windows, and closing the window exits.");
-        }
     }
 
     // --- Claude connector (MCP) ---
