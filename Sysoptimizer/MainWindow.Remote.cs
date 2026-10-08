@@ -46,7 +46,9 @@ public partial class MainWindow
                 if (key!.GetValue(name) is string data && data.Split('|') is [var address, var portText, var keyText]
                     && int.TryParse(portText, out int port) && RemoteCrypto.ParseKey(keyText) is { } secret)
                     _remotes.Add(new RemoteHistory(name, address, port, secret));
-        RefreshRemoteLists();
+        // The PC picked last time stays picked: watching another PC is usually what this one is set up for.
+        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
+            RefreshRemoteLists(key?.GetValue("Showing") as string);
         Closed += (_, _) => _server?.Dispose();
     }
 
@@ -165,10 +167,10 @@ public partial class MainWindow
         RefreshRemoteLists();
     }
 
-    private void RefreshRemoteLists()
+    private void RefreshRemoteLists(string? select = null)
     {
         RemotePcList.ItemsSource = _remotes.Select(r => new OptionItem { Name = r.Name, Description = $"{r.Address}, port {r.Port}" }).ToList();
-        string? selected = _source?.Name;
+        string? selected = select ?? _source?.Name;
         HistorySourceCombo.Items.Clear();
         HistorySourceCombo.Items.Add(new ComboBoxItem { Content = "This PC" });
         foreach (var r in _remotes) HistorySourceCombo.Items.Add(new ComboBoxItem { Content = r.Name, Tag = r });
@@ -182,6 +184,9 @@ public partial class MainWindow
         var source = (HistorySourceCombo.SelectedItem as ComboBoxItem)?.Tag as RemoteHistory;
         if (source == _source) return;
         _source = source;
+        if (HistorySourceCombo.SelectedItem != null) // not the moment the list is being refilled
+            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer"))
+                key.SetValue("Showing", source?.Name ?? "");
         _sourceError = null;
         _dayCache.Clear();
         _dayLoading.Clear();
