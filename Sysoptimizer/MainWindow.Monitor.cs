@@ -85,7 +85,9 @@ public partial class MainWindow
         var now = DateTime.UtcNow;
         var sample = new SysSample(now, (float)snap.CpuPercent, (float)snap.MemPercent,
             snap.GpuAvailable ? (float)snap.GpuPercent : float.NaN, (float)snap.CpuTempC, (float)snap.GpuTempC,
-            (float)snap.Disks.Sum(d => d.ReadMBs + d.WriteMBs), (float)snap.Nets.Sum(n => n.DownMbps + n.UpMbps));
+            (float)snap.Disks.Sum(d => d.ReadMBs + d.WriteMBs), (float)snap.Nets.Sum(n => n.DownMbps + n.UpMbps),
+            (float)snap.CpuWatts, (float)snap.GpuWatts, snap.Fans.Count > 0 ? (float)snap.Fans.Max(f => f.Rpm) : float.NaN,
+            snap.Battery is { } battery ? (float)battery.Percent : float.NaN);
         var top = historyTick && processes != null
             ? ProcessMonitor.ForHistory(processes).Select(p => new ProcSample(now, p.Name, (float)p.Cpu, (float)p.RamMB, (float)p.Gpu)).ToList()
             : null;

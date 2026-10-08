@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -175,7 +176,15 @@ public partial class MainWindow
         return v > 0 ? v : fallback;
     }
 
-    private DateTime? _cpuHotSince, _gpuHotSince, _memHighSince;
+    /// <summary>Since when each limit has been crossed, for one PC (this one, or each watched one).</summary>
+    private sealed class AlertState
+    {
+        public DateTime? CpuHotSince, GpuHotSince, MemHighSince, OfflineSince;
+        public bool OfflineAlerted;
+    }
+
+    private readonly AlertState _localAlerts = new();
+    private readonly Dictionary<string, AlertState> _remoteAlerts = new();
     private readonly Dictionary<string, DateTime> _appBusySince = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> _alertedAt = new();
 
@@ -183,12 +192,7 @@ public partial class MainWindow
     private void CheckAlerts(ResourceSnapshot snap, List<ProcessUsage>? processes)
     {
         var now = DateTime.UtcNow;
-        Sustained(ref _cpuHotSince, _alertCpuTempOn && snap.CpuTempC >= _alertCpuTemp, SustainSeconds, "cpu-temp",
-            () => $"CPU at {snap.CpuTempC:0}°C for over {SustainSeconds} s (limit {_alertCpuTemp}°C)");
-        Sustained(ref _gpuHotSince, _alertGpuTempOn && snap.GpuTempC >= _alertGpuTemp, SustainSeconds, "gpu-temp",
-            () => $"GPU at {snap.GpuTempC:0}°C for over {SustainSeconds} s (limit {_alertGpuTemp}°C)");
-        Sustained(ref _memHighSince, _alertMemOn && snap.MemPercent >= _alertMem, MemSustainSeconds, "memory",
-            () => $"Memory at {snap.MemPercent:0}% for over a minute (limit {_alertMem}%)");
+        CheckLimits(_localAlerts, snap, pc: null);
 
         if (processes == null) return;
         if (!_alertAppCpuOn) { _appBusySince.Clear(); return; }
@@ -201,12 +205,74 @@ public partial class MainWindow
                 Alert($"app:{name}", $"{name} has used over {_alertAppCpu}% CPU for {_alertAppMinutes} min (now {p.Cpu:0}%)");
         }
 
-        void Sustained(ref DateTime? since, bool over, int seconds, string key, Func<string> text)
+    }
+
+    /// <summary>The temperature and memory rules, for this PC (pc = null) or a watched one (its name leads the text).</summary>
+    private void CheckLimits(AlertState state, ResourceSnapshot snap, string? pc)
+    {
+        var now = DateTime.UtcNow;
+        string who = pc == null ? "" : $"{pc}: ", key = pc == null ? "" : $"{pc}:";
+        Sustained(ref state.CpuHotSince, _alertCpuTempOn && snap.CpuTempC >= _alertCpuTemp, SustainSeconds, key + "cpu-temp",
+            () => $"{who}CPU at {snap.CpuTempC:0}°C for over {SustainSeconds} s (limit {_alertCpuTemp}°C)");
+        Sustained(ref state.GpuHotSince, _alertGpuTempOn && snap.GpuTempC >= _alertGpuTemp, SustainSeconds, key + "gpu-temp",
+            () => $"{who}GPU at {snap.GpuTempC:0}°C for over {SustainSeconds} s (limit {_alertGpuTemp}°C)");
+        Sustained(ref state.MemHighSince, _alertMemOn && snap.MemPercent >= _alertMem, MemSustainSeconds, key + "memory",
+            () => $"{who}Memory at {snap.MemPercent:0}% for over a minute (limit {_alertMem}%)");
+
+        void Sustained(ref DateTime? since, bool over, int seconds, string alertKey, Func<string> text)
         {
             if (!over) { since = null; return; }
             since ??= now;
-            if ((now - since.Value).TotalSeconds >= seconds) Alert(key, text());
+            if ((now - since.Value).TotalSeconds >= seconds) Alert(alertKey, text());
         }
+    }
+
+    // --- watched PCs ---
+
+    private const string RemoteAlertsKey = @"Software\Sysoptimizer\RemotePCAlerts";
+    private const int OfflineAfterSeconds = 60;
+    private readonly HashSet<string> _remoteAlertPolling = new();
+
+    private static bool RemoteAlertsOn(string pc)
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RemoteAlertsKey);
+        return key?.GetValue(pc) is not 0; // on unless switched off
+    }
+
+    /// <summary>Every 5 s: each watched PC with alerts on is asked for its reading and checked against the same limits.</summary>
+    private void PollRemoteAlerts()
+    {
+        foreach (var pc in _remotes.Where(r => RemoteAlertsOn(r.Name)))
+        {
+            if (!_remoteAlertPolling.Add(pc.Name)) continue; // still waiting on the last answer
+            var state = _remoteAlerts.TryGetValue(pc.Name, out var s) ? s : _remoteAlerts[pc.Name] = new AlertState();
+            Task.Run(() => JsonSerializer.Deserialize<ResourceSnapshot>(pc.Live(), LiveJson)).ContinueWith(t =>
+            {
+                _remoteAlertPolling.Remove(pc.Name);
+                if (!_remotes.Contains(pc)) return; // removed meanwhile
+                if (t.IsCompletedSuccessfully && t.Result is { } snap)
+                {
+                    if (state.OfflineAlerted) Alert($"{pc.Name}:online", $"{pc.Name} is answering again");
+                    (state.OfflineSince, state.OfflineAlerted) = (null, false);
+                    CheckLimits(state, snap, pc.Name);
+                    return;
+                }
+                state.OfflineSince ??= DateTime.UtcNow;
+                if (!state.OfflineAlerted && (DateTime.UtcNow - state.OfflineSince.Value).TotalSeconds >= OfflineAfterSeconds)
+                {
+                    state.OfflineAlerted = true;
+                    Alert($"{pc.Name}:offline", $"{pc.Name} stopped answering — {t.Exception?.InnerException?.Message ?? "no reading"}");
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        }
+    }
+
+    private void RemoteAlerts_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { Tag: string pc } check) return;
+        using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RemoteAlertsKey))
+            key.SetValue(pc, check.IsChecked == true ? 1 : 0, Microsoft.Win32.RegistryValueKind.DWord);
+        _remoteAlerts.Remove(pc); // start the timers afresh
     }
 
     /// <summary>Called for each confirmed launch; checks the exe's signature off the UI thread.</summary>

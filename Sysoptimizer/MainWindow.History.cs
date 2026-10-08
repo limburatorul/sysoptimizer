@@ -244,7 +244,8 @@ public partial class MainWindow
 
     private static string FormatMB(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";
     // The app lists rank by CPU on the Disk and Network views: per-app disk and network use isn't recorded.
-    private string ListMetric => _historyMetric is "disk" or "net" ? "cpu" : _historyMetric;
+    private bool SystemOnlyMetric => _historyMetric is "disk" or "net" or "power" or "fan" or "battery";
+    private string ListMetric => SystemOnlyMetric ? "cpu" : _historyMetric;
     private string MetricLabel() => ListMetric switch { "mem" => "Memory", "gpu" => "GPU", _ => "CPU" };
     private string SortKey() => ListMetric switch { "mem" => "ram", "gpu" => "gpu", _ => "cpu" };
 
@@ -252,16 +253,19 @@ public partial class MainWindow
     private double _scale = 100;  // what the chart's full height stands for, in the metric's own unit
 
     /// <summary>Percent metrics fill a fixed 0-100 %; disk, network and an app's memory scale to what's on screen.</summary>
-    private bool InPercent => _historyApp == null ? _historyMetric is "cpu" or "mem" or "gpu" : _historyMetric != "mem";
+    private bool InPercent => _historyApp == null ? IsPercentMetric(_historyMetric) : _historyMetric != "mem";
+    private static bool IsPercentMetric(string metric) => metric is "cpu" or "mem" or "gpu" or "battery";
     private static float Raw(SysSample s, string metric) => metric switch
     {
-        "mem" => s.Mem, "gpu" => s.Gpu, "disk" => s.DiskMBs, "net" => s.NetMbps, _ => s.Cpu,
+        "mem" => s.Mem, "gpu" => s.Gpu, "disk" => s.DiskMBs, "net" => s.NetMbps, "fan" => s.FanRpm, "battery" => s.BatteryPct,
+        "power" => float.IsNaN(s.CpuWatts) ? s.GpuWatts : float.IsNaN(s.GpuWatts) ? s.CpuWatts : s.CpuWatts + s.GpuWatts,
+        _ => s.Cpu,
     };
     /// <summary>The plotted value, 0-100 of the chart's height.</summary>
     private float Metric(SysSample s) => (float)(Raw(s, _historyMetric) / _scale * 100);
     private string FormatValue(double v) => InPercent
         ? (v < 10 ? $"{v:0.0}%" : $"{v:0}%")
-        : _historyMetric switch { "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", _ => FormatMB(v) };
+        : _historyMetric switch { "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", "power" => $"{v:0} W", "fan" => $"{v:0} RPM", _ => FormatMB(v) };
 
     /// <summary>1, 2 or 5 × a power of ten, at least the value: a scale whose labels read cleanly.</summary>
     private static double NiceCeiling(double max)
@@ -364,7 +368,8 @@ public partial class MainWindow
         var accent = MetricColor();
         // Colour follows height: the theme accent at rest, its warning colour from ~70%, its bad colour near 100%.
         Color hot = ThemeColor("StatusBad", Hot), warm = ThemeColor("StatusWarn", Warm);
-        if (!InPercent) hot = warm = accent; // the top of an auto-scaled chart is just "the most in view", not alarming
+        // The top of an auto-scaled chart is just "the most in view", and a full battery is good news: no alarm colours.
+        if (!InPercent || _historyMetric == "battery") hot = warm = accent;
         LinearGradientBrush Heat(byte hotA, byte warmA, byte restA, byte floorA) => new(new GradientStopCollection
         {
             new(Alpha(hot, hotA), 0), new(Alpha(warm, warmA), 0.3), new(Alpha(accent, restA), 0.5), new(Alpha(accent, floorA), 1),
@@ -1010,8 +1015,13 @@ public partial class MainWindow
             rows.Children.Add(CardRow("GPU", $"{p.Gpu:0.0}%"));
             return;
         }
-        if (_historyMetric is "disk" or "net")
-            rows.Children.Add(CardRow(_historyMetric == "disk" ? "Per-app disk use isn't recorded — top CPU:" : "Per-app network use isn't recorded — top CPU:", "", secondary: true, bottom: 2));
+        if (SystemOnlyMetric)
+        {
+            var at = _hist.System.Count > 0 ? Nearest(_hist.System, time, x => x.Time) : default;
+            if (_historyMetric == "power" && !float.IsNaN(at.CpuWatts + at.GpuWatts))
+                rows.Children.Add(CardRow($"CPU {at.CpuWatts:0} W · GPU {at.GpuWatts:0} W", "", secondary: true, bottom: 2));
+            rows.Children.Add(CardRow("Not recorded per app — the top CPU users then:", "", secondary: true, bottom: 2));
+        }
         var ranked = apps.Where(p => MetricOf(p) > 0).OrderByDescending(MetricOf).ToList();
         foreach (var p in ranked.Take(5)) rows.Children.Add(CardRow(p.Name, Amount(MetricOf(p))));
         // CPU and GPU shares add up to the total, so the rest is what the top five leave out; memory per app doesn't.
@@ -1078,7 +1088,7 @@ public partial class MainWindow
 
         var navCols = MakeColumns(fromUtc, span, w, Math.Max(1, (int)(w / 3)));
         string navMetric = _historyMetric;
-        double navScale = navMetric is "disk" or "net"
+        double navScale = !IsPercentMetric(navMetric)
             ? NiceCeiling(_navData.Select(x => Raw(x, navMetric)).Where(v => !float.IsNaN(v)).DefaultIfEmpty(0).Max()) : 100;
         var peaks = Bucket(_navData, x => (float)(Raw(x, navMetric) / navScale * 100), navCols);
         var navColor = MetricColor();
@@ -1252,8 +1262,8 @@ public partial class MainWindow
     {
         if (sender is not FrameworkElement { DataContext: OptionItem { Name: { } app } } || app.Length == 0) return;
         _historyApp = app;
-        if (_historyMetric is "disk" or "net") HistoryMetricCpu.IsChecked = true; // per app, only these were recorded
-        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = false;
+        if (SystemOnlyMetric) HistoryMetricCpu.IsChecked = true; // per app, only CPU, memory and GPU were recorded
+        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = HistoryMetricPower.IsEnabled = HistoryMetricFan.IsEnabled = HistoryMetricBattery.IsEnabled = false;
         HistoryAppChip.Content = $"{app}  ✕";
         HistoryAppChip.Visibility = Visibility.Visible;
         _animateChart = true;
@@ -1263,7 +1273,7 @@ public partial class MainWindow
     private void HistoryAppClear_Click(object sender, RoutedEventArgs e)
     {
         _historyApp = null;
-        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = true;
+        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = HistoryMetricPower.IsEnabled = HistoryMetricFan.IsEnabled = HistoryMetricBattery.IsEnabled = true;
         HistoryAppChip.Visibility = Visibility.Collapsed;
         _animateChart = true;
         DrawHistory();
@@ -1295,6 +1305,50 @@ public partial class MainWindow
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer");
         key.SetValue("HistoryListHeight", (int)HistoryListsRow.ActualHeight, RegistryValueKind.DWord);
+    }
+
+    /// <summary>
+    /// The range on screen, as two CSV files: the readings (per second, or per-minute peaks on long ranges)
+    /// and the apps recorded with them. Written in this PC's list separator and number format, so Excel opens
+    /// them straight into columns whatever the regional settings.
+    /// </summary>
+    private void ExportHistory_Click(object sender, RoutedEventArgs e)
+    {
+        string pc = _source?.Name ?? Environment.MachineName;
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "CSV (Excel)|*.csv",
+            FileName = $"Sysoptimizer {pc} {_historyFrom:yyyy-MM-dd HHmm} to {_historyTo:yyyy-MM-dd HHmm}.csv",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        string sep = culture.TextInfo.ListSeparator;
+        string N(float v) => float.IsNaN(v) ? "" : v.ToString("0.##", culture);
+        string Csv(string text) => text.Contains(sep) || text.Contains('"') ? $"\"{text.Replace("\"", "\"\"")}\"" : text;
+        string When(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
+        var system = new System.Text.StringBuilder();
+        system.AppendLine(string.Join(sep, "Time", "CPU %", "Memory %", "GPU %", "CPU °C", "GPU °C", "Disk MB/s", "Network Mbps", "CPU W", "GPU W", "Fan RPM", "Battery %"));
+        foreach (var x in _hist.System)
+            system.AppendLine(string.Join(sep, When(x.Time), N(x.Cpu), N(x.Mem), N(x.Gpu), N(x.CpuTemp), N(x.GpuTemp), N(x.DiskMBs), N(x.NetMbps), N(x.CpuWatts), N(x.GpuWatts), N(x.FanRpm), N(x.BatteryPct)));
+        var apps = new System.Text.StringBuilder();
+        apps.AppendLine(string.Join(sep, "Time", "App", "CPU %", "Memory MB", "GPU %"));
+        foreach (var p in _hist.Processes)
+            apps.AppendLine(string.Join(sep, When(p.Time), Csv(p.Name), N(p.Cpu), N(p.RamMB), N(p.Gpu)));
+
+        string appsPath = System.IO.Path.ChangeExtension(dialog.FileName, null) + " - apps.csv";
+        try
+        {
+            // UTF-8 with a BOM: without it Excel reads "°C" as mojibake.
+            System.IO.File.WriteAllText(dialog.FileName, system.ToString(), new System.Text.UTF8Encoding(true));
+            System.IO.File.WriteAllText(appsPath, apps.ToString(), new System.Text.UTF8Encoding(true));
+            Log($"Exported {_hist.System.Count} readings and {_hist.Processes.Count} app rows to {dialog.FileName} (+ \"- apps.csv\").");
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            Log($"Export failed — {ex.Message}");
+        }
     }
 
     private void NavigatorSpan_Changed(object sender, SelectionChangedEventArgs e)

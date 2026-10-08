@@ -19,6 +19,22 @@ public class NetSnapshot
     public bool LatencyAvailable { get; set; }
 }
 
+public class FanReading
+{
+    public string Name { get; set; } = "";
+    public double Rpm { get; set; }
+}
+
+/// <summary>A laptop's battery; absent on a desktop.</summary>
+public class BatteryReading
+{
+    public double Percent { get; set; }
+    public bool PluggedIn { get; set; }
+    public bool Charging { get; set; }
+    public double Watts { get; set; } = double.NaN;       // charge or drain rate, when reported
+    public double MinutesLeft { get; set; } = double.NaN; // on battery only
+}
+
 public class ResourceSnapshot
 {
     public double CpuPercent { get; set; }
@@ -27,6 +43,10 @@ public class ResourceSnapshot
     public double UptimeSeconds { get; set; }
     public double CpuTempC { get; set; } = double.NaN;
     public double GpuTempC { get; set; } = double.NaN;
+    public double CpuWatts { get; set; } = double.NaN;
+    public double GpuWatts { get; set; } = double.NaN;
+    public List<FanReading> Fans { get; set; } = new();
+    public BatteryReading? Battery { get; set; }
     public Dictionary<int, double> GpuByPid { get; set; } = new();
     public double MemUsedGB { get; set; }
     public double MemTotalGB { get; set; }

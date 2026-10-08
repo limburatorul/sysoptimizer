@@ -6,7 +6,12 @@ namespace Sysoptimizer.Services;
 
 /// <param name="DiskMBs">Read + write across all disks, MB/s.</param>
 /// <param name="NetMbps">Down + up across all adapters, Mbit/s.</param>
-public readonly record struct SysSample(DateTime Time, float Cpu, float Mem, float Gpu, float CpuTemp, float GpuTemp, float DiskMBs = float.NaN, float NetMbps = float.NaN);
+/// <param name="CpuWatts">CPU package power draw, W.</param>
+/// <param name="GpuWatts">Graphics card power draw, W.</param>
+/// <param name="FanRpm">The fastest fan's speed, RPM.</param>
+/// <param name="BatteryPct">Battery charge, %; unknown on a desktop.</param>
+public readonly record struct SysSample(DateTime Time, float Cpu, float Mem, float Gpu, float CpuTemp, float GpuTemp,
+    float DiskMBs = float.NaN, float NetMbps = float.NaN, float CpuWatts = float.NaN, float GpuWatts = float.NaN, float FanRpm = float.NaN, float BatteryPct = float.NaN);
 public readonly record struct ProcSample(DateTime Time, string Name, float Cpu, float RamMB, float Gpu);
 /// <param name="Kind">launch (Detail = app), sleep, wake, start (Detail = boot time, unix seconds).</param>
 public readonly record struct HistoryEvent(DateTime Time, string Kind, string Detail);
@@ -16,8 +21,9 @@ public sealed record HistoryData(List<SysSample> System, List<ProcSample> Proces
 /// <summary>
 /// The recorded history: one plain-text file per local day under ProgramData (writable by the elevated
 /// app, readable by the non-elevated MCP server). Lines:
-///   S,unixSeconds,cpu,mem,gpu,cpuTemp,gpuTemp,diskMBs,netMbps — every second (blank when unknown;
-///                                                   files from before 1.5 end at gpuTemp)
+///   S,unixSeconds,cpu,mem,gpu,cpuTemp,gpuTemp,diskMBs,netMbps,cpuW,gpuW,fanRpm,battery%
+///                                                 — every second (blank when unknown; older files end
+///                                                   earlier: at gpuTemp before 1.5, at netMbps before 1.6)
 ///   P,unixSeconds,name,cpu,ramMB,gpu              — the top processes, every 10 seconds
 ///   E,unixSeconds,kind,detail                     — app launches, sleep/wake, app start (with boot time)
 /// Today's file is appended and flushed line by line, so a hard reset loses at most a torn last line,
@@ -46,7 +52,8 @@ public static class HistoryStore
         {
             var w = WriterFor(sample.Time);
             long t = Unix(sample.Time);
-            w.WriteLine($"S,{t},{F(sample.Cpu)},{F(sample.Mem)},{F(sample.Gpu)},{F(sample.CpuTemp)},{F(sample.GpuTemp)},{F(sample.DiskMBs)},{F(sample.NetMbps)}");
+            w.WriteLine($"S,{t},{F(sample.Cpu)},{F(sample.Mem)},{F(sample.Gpu)},{F(sample.CpuTemp)},{F(sample.GpuTemp)},{F(sample.DiskMBs)},{F(sample.NetMbps)},"
+                + $"{F(sample.CpuWatts)},{F(sample.GpuWatts)},{F(sample.FanRpm)},{F(sample.BatteryPct)}");
             if (processes == null) return;
             foreach (var p in processes)
                 w.WriteLine($"P,{t},{Clean(p.Name)},{F(p.Cpu)},{F(p.RamMB)},{F(p.Gpu)}");
@@ -185,7 +192,7 @@ public static class HistoryStore
     /// <summary>Raw lines → one S row per minute (peaks), its top apps as P rows, and the E rows as they are.</summary>
     private static List<string> Summarize(StreamReader raw)
     {
-        var minutes = new SortedDictionary<long, (float Cpu, float Mem, float Gpu, float CpuT, float GpuT, float Disk, float Net)>();
+        var minutes = new SortedDictionary<long, float[]>(); // the minute's peak of each S column after the time
         // Peaks, not averages, for apps too: a 15-second burst to 100% must still read as 100% at minute level.
         var procs = new Dictionary<long, Dictionary<string, (float Cpu, float Ram, float Gpu)>>();
         var events = new List<string>();
@@ -198,9 +205,13 @@ public static class HistoryStore
             long m = t / 60 * 60;
             if (f[0] == "S" && f.Length >= 7)
             {
-                var cur = minutes.TryGetValue(m, out var seen) ? seen : (Cpu: float.NaN, Mem: float.NaN, Gpu: float.NaN, CpuT: float.NaN, GpuT: float.NaN, Disk: float.NaN, Net: float.NaN);
-                minutes[m] = (Max(cur.Cpu, P(f[2])), Max(cur.Mem, P(f[3])), Max(cur.Gpu, P(f[4])), Max(cur.CpuT, P(f[5])), Max(cur.GpuT, P(f[6])),
-                              Max(cur.Disk, f.Length >= 9 ? P(f[7]) : float.NaN), Max(cur.Net, f.Length >= 9 ? P(f[8]) : float.NaN));
+                if (!minutes.TryGetValue(m, out var peaks)) { peaks = new float[SysColumns]; Array.Fill(peaks, float.NaN); minutes[m] = peaks; }
+                for (int i = 0; i < SysColumns && i + 2 < f.Length; i++)
+                {
+                    float v = P(f[i + 2]);
+                    // A battery's minute is its lowest charge, not its highest: the drain is what matters.
+                    peaks[i] = i == BatteryColumn ? Min(peaks[i], v) : Max(peaks[i], v);
+                }
             }
             else if (f[0] == "P" && f.Length >= 6)
             {
@@ -213,7 +224,7 @@ public static class HistoryStore
 
         var lines = new List<string>(minutes.Count * 8 + events.Count);
         foreach (var (m, s) in minutes)
-            lines.Add($"S,{m},{F(s.Cpu)},{F(s.Mem)},{F(s.Gpu)},{F(s.CpuT)},{F(s.GpuT)},{F(s.Disk)},{F(s.Net)}");
+            lines.Add($"S,{m}," + string.Join(',', s.Select(F)));
         foreach (var (m, byName) in procs)
         {
             var rows = byName.Select(kv => (Name: kv.Key, kv.Value.Cpu, kv.Value.Ram, kv.Value.Gpu)).ToList();
@@ -227,7 +238,9 @@ public static class HistoryStore
         return lines;
     }
 
+    private const int SysColumns = 11, BatteryColumn = 10; // S values after the time: cpu … battery
     private static float Max(float a, float b) => float.IsNaN(a) ? b : float.IsNaN(b) ? a : Math.Max(a, b);
+    private static float Min(float a, float b) => float.IsNaN(a) ? b : float.IsNaN(b) ? a : Math.Min(a, b);
 
     /// <summary>History lines from anywhere (another PC's, say), sorted the way readers expect.</summary>
     public static HistoryData Parse(TextReader reader)
@@ -249,8 +262,10 @@ public static class HistoryStore
             if (f.Length < 3 || !long.TryParse(f[1], Inv, out long t) || t < fromT || t > toT) continue;
             var time = DateTimeOffset.FromUnixTimeSeconds(t).UtcDateTime;
             if (f[0] == "S" && f.Length >= 7)
-                data.System.Add(new SysSample(time, P(f[2]), P(f[3]), P(f[4]), P(f[5]), P(f[6]),
-                    f.Length >= 9 ? P(f[7]) : float.NaN, f.Length >= 9 ? P(f[8]) : float.NaN));
+            {
+                float C(int i) => f.Length > i ? P(f[i]) : float.NaN; // older files have fewer columns
+                data.System.Add(new SysSample(time, P(f[2]), P(f[3]), P(f[4]), P(f[5]), P(f[6]), C(7), C(8), C(9), C(10), C(11), C(12)));
+            }
             else if (systemOnly) continue;
             else if (f[0] == "P" && f.Length >= 6)
                 data.Processes.Add(new ProcSample(time, f[2], P(f[3]), P(f[4]), P(f[5])));

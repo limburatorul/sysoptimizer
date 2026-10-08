@@ -50,6 +50,9 @@ public partial class MainWindow
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
             RefreshRemoteLists(key?.GetValue("Showing") as string);
         Closed += (_, _) => _server?.Dispose();
+        var alertTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        alertTimer.Tick += (_, _) => PollRemoteAlerts();
+        alertTimer.Start();
     }
 
     // --- sharing this PC ---
@@ -169,7 +172,7 @@ public partial class MainWindow
 
     private void RefreshRemoteLists(string? select = null)
     {
-        RemotePcList.ItemsSource = _remotes.Select(r => new OptionItem { Name = r.Name, Description = $"{r.Address}, port {r.Port}" }).ToList();
+        RemotePcList.ItemsSource = _remotes.Select(r => new OptionItem { Name = r.Name, Description = $"{r.Address}, port {r.Port}", IsChecked = RemoteAlertsOn(r.Name) }).ToList();
         string? selected = select ?? _source?.Name;
         HistorySourceCombo.Items.Clear();
         HistorySourceCombo.Items.Add(new ComboBoxItem { Content = "This PC" });

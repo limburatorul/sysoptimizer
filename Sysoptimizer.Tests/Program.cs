@@ -30,7 +30,7 @@ try
 {
     // 1. Today: write a sample, its apps and an event, read them back at full resolution.
     var now = DateTime.UtcNow;
-    HistoryStore.Write(new SysSample(now, 12.5f, 40, 7, 65, 45, 33.3f, 8.5f),
+    HistoryStore.Write(new SysSample(now, 12.5f, 40, 7, 65, 45, 33.3f, 8.5f, 107.5f, 53, 1164, float.NaN),
         new[] { new ProcSample(now, "chrome", 5.5f, 1200, 2), new ProcSample(now, "game,with comma", 1, 300, 50) });
     HistoryStore.WriteEvent("launch", "notepad", now);
     var today = HistoryStore.Read(now.AddMinutes(-1), now.AddMinutes(1));
@@ -38,6 +38,7 @@ try
     Check(today.System.Count == 1, "today: one sample read back");
     Check(s.Cpu == 12.5f && s.Mem == 40 && s.Gpu == 7 && s.CpuTemp == 65 && s.GpuTemp == 45, "today: cpu/mem/gpu/temps round-trip");
     Check(Math.Abs(s.DiskMBs - 33.3f) < 0.01 && s.NetMbps == 8.5f, "today: disk and network round-trip");
+    Check(s.CpuWatts == 107.5f && s.GpuWatts == 53 && s.FanRpm == 1164 && float.IsNaN(s.BatteryPct), "today: power, fan and (no) battery round-trip");
     Check(today.Processes.Count == 2 && today.Processes.Any(p => p.Name == "game_with comma" && p.Gpu == 50), "today: apps round-trip, a comma in a name can't split the line");
     Check(today.Events.Count == 1 && today.Events[0].Kind == "launch" && today.Events[0].Detail == "notepad", "today: event round-trip");
 
@@ -50,7 +51,8 @@ try
         $"S,{noon + 1},6,30,1,60,40,10,2",
         "garbage line",
         $"S,{noon + 2},100,31,2,70,41,250,90",    // the spike, inside the same minute
-        $"S,{noon + 3},7,30,1,61,40,1,1",
+        $"S,{noon + 3},7,30,1,61,40,1,1,90,40,900,80",
+        $"S,{noon + 5},7,30,1,61,40,1,1,150,60,1500,62",   // a laptop: power and fans peak, battery drains
         $"P,{noon},quiet,1,100,0",
         $"P,{noon + 2},burner,95,500,0",
         $"E,{noon + 2},sleep,",
@@ -58,7 +60,7 @@ try
     };
     File.WriteAllLines(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv"), lines);
     var raw = HistoryStore.ReadDay(yesterday, minutes: false);
-    Check(raw.System.Count == 4, "old day: torn and junk lines skipped, four samples read");
+    Check(raw.System.Count == 5, "old day: torn and junk lines skipped, five samples read");
     Check(float.IsNaN(raw.System[0].DiskMBs) && float.IsNaN(raw.System[0].NetMbps), "old day: a 7-field line reads disk/network as unknown");
     Check(raw.System[1].DiskMBs == 10 && raw.System[1].NetMbps == 2, "old day: a 9-field line keeps disk/network");
 
@@ -67,6 +69,8 @@ try
     Check(minutes.System.Count == 1, "minutes: one row for the minute");
     var m = minutes.System.SingleOrDefault();
     Check(m.Cpu == 100 && m.DiskMBs == 250 && m.NetMbps == 90 && m.CpuTemp == 70, "minutes: peaks survive, disk/network included");
+    Check(m.CpuWatts == 150 && m.GpuWatts == 60 && m.FanRpm == 1500, "minutes: power and fan peaks survive");
+    Check(m.BatteryPct == 62, "minutes: the battery keeps its lowest charge, not its highest");
     Check(minutes.Processes.Any(p => p.Name == "burner" && p.Cpu == 95), "minutes: the app behind the spike is kept at its peak");
     Check(minutes.Events.Count == 1 && minutes.Events[0].Kind == "sleep", "minutes: events copied through");
     Check(File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.min.csv")), "minutes: summary file written for a finished day");
@@ -77,7 +81,7 @@ try
     HistoryStore.Maintain(DateTime.Today);
     Check(File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv.gz")) && !File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv")), "maintain: yesterday gzipped");
     Check(!File.Exists(Path.Combine(folder, $"{old:yyyy-MM-dd}.csv")), "maintain: a day past retention deleted");
-    Check(HistoryStore.ReadDay(yesterday, minutes: false).System.Count == 4, "maintain: the gzipped day reads the same");
+    Check(HistoryStore.ReadDay(yesterday, minutes: false).System.Count == 5, "maintain: the gzipped day reads the same");
     using (var gz = new StreamReader(new GZipStream(File.OpenRead(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv.gz")), CompressionMode.Decompress)))
         Check(gz.ReadToEnd().Contains("burner"), "maintain: gzip holds the original lines");
 

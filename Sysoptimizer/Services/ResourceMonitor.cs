@@ -149,10 +149,27 @@ public class ResourceMonitor : IDisposable
             snap.GpuMemUsedGB = _gpuMemCounters.Sum(c => _query.Read(c)) / 1073741824.0;
         }
 
+        // Windows' own battery report: always there on a laptop, no driver needed (the sensor library adds the rate).
+        var power = System.Windows.Forms.SystemInformation.PowerStatus;
+        if (!power.BatteryChargeStatus.HasFlag(System.Windows.Forms.BatteryChargeStatus.NoSystemBattery) && !power.BatteryChargeStatus.HasFlag(System.Windows.Forms.BatteryChargeStatus.Unknown))
+            snap.Battery = new BatteryReading
+            {
+                Percent = power.BatteryLifePercent * 100,
+                PluggedIn = power.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Online,
+                Charging = power.BatteryChargeStatus.HasFlag(System.Windows.Forms.BatteryChargeStatus.Charging),
+                MinutesLeft = power.BatteryLifeRemaining > 0 ? power.BatteryLifeRemaining / 60.0 : double.NaN,
+            };
+
         if (_sensors is { IsCompletedSuccessfully: true, Result: { } sensors })
         {
-            try { (snap.CpuTempC, snap.GpuTempC) = sensors.Read(); }
-            catch (Exception ex) { SensorError = ex.Message; } // blanks this sample's temperatures only
+            try
+            {
+                var r = sensors.Read();
+                (snap.CpuTempC, snap.GpuTempC, snap.CpuWatts, snap.GpuWatts) = (r.CpuC, r.GpuC, r.CpuWatts, r.GpuWatts);
+                snap.Fans = r.Fans.Select(f => new FanReading { Name = f.Name, Rpm = f.Rpm }).ToList();
+                if (snap.Battery != null) snap.Battery.Watts = r.BatteryWatts;
+            }
+            catch (Exception ex) { SensorError = ex.Message; } // blanks this sample's sensor readings only
         }
 
         var now = DateTime.UtcNow;

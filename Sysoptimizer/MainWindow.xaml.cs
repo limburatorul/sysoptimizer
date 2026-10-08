@@ -304,6 +304,7 @@ public partial class MainWindow : Window
         {
             snap.CpuFrequencyGHz > 0 ? $"{snap.CpuFrequencyGHz:0.00} GHz" : null,
             double.IsNaN(snap.CpuTempC) ? null : $"{snap.CpuTempC:0}°C",
+            double.IsNaN(snap.CpuWatts) ? null : $"{snap.CpuWatts:0} W",
             $"Up {FormatUptime(snap.UptimeSeconds)}",
         }.Where(s => s != null));
         PushHistory(_cpuHistory, snap.CpuPercent);
@@ -321,9 +322,11 @@ public partial class MainWindow : Window
         if (snap.GpuAvailable)
         {
             GpuPercentText.Text = $"{snap.GpuPercent:0}%";
-            GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM{Temp(snap.GpuTempC)}";
+            GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM{Temp(snap.GpuTempC)}" + (double.IsNaN(snap.GpuWatts) ? "" : $" · {snap.GpuWatts:0} W");
             PushHistory(_gpuHistory, snap.GpuPercent);
         }
+
+        ShowPower(snap);
 
         foreach (var d in snap.Disks)
         {
@@ -342,6 +345,24 @@ public partial class MainWindow : Window
             PushHistory(card.SpeedHistory, n.DownMbps + n.UpMbps);
             if (n.LatencyAvailable) PushHistory(card.LatencyHistory, n.LatencyMs);
         }
+    }
+
+    /// <summary>The "Power &amp; cooling" card: draw, fans, and the battery on a laptop.</summary>
+    private void ShowPower(ResourceSnapshot snap)
+    {
+        bool cpuW = !double.IsNaN(snap.CpuWatts), gpuW = !double.IsNaN(snap.GpuWatts);
+        PowerText.Text = cpuW || gpuW
+            ? string.Join(" · ", new[] { cpuW ? $"CPU {snap.CpuWatts:0} W" : null, gpuW ? $"GPU {snap.GpuWatts:0} W" : null }.Where(s => s != null))
+              + (cpuW && gpuW ? $" · {snap.CpuWatts + snap.GpuWatts:0} W together" : "")
+            : "Power draw unavailable" + (double.IsNaN(snap.CpuTempC) ? " (needs the PawnIO driver)" : "");
+        FansText.Text = snap.Fans.Count > 0
+            ? "Fans: " + string.Join(" · ", snap.Fans.Select(f => $"{f.Name} {f.Rpm:0} RPM"))
+            : "No fan speeds reported";
+        HistoryMetricBattery.Visibility = BatteryText.Visibility = snap.Battery == null ? Visibility.Collapsed : Visibility.Visible;
+        if (snap.Battery is { } b)
+            BatteryText.Text = $"Battery {b.Percent:0}% · " + (b.Charging ? "charging" : b.PluggedIn ? "plugged in" : "on battery")
+                + (double.IsNaN(b.Watts) ? "" : $" · {b.Watts:0.#} W")
+                + (!b.PluggedIn && !double.IsNaN(b.MinutesLeft) ? $" · {(int)(b.MinutesLeft / 60)} h {(int)(b.MinutesLeft % 60)} min left" : "");
     }
 
     /// <summary>Switching PCs: the live graphs and the per-disk / per-adapter cards start over for the new one.</summary>
