@@ -90,6 +90,9 @@ public partial class MainWindow
         NavigatorSpanCombo.SelectedItem = NavigatorSpanCombo.Items.Cast<ComboBoxItem>()
             .FirstOrDefault(i => (string)i.Tag == _navHours.ToString()) ?? NavigatorSpanCombo.SelectedItem;
 
+        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
+            if (key?.GetValue("HistoryListHeight") is int listHeight) HistoryListsRow.Height = new GridLength(Math.Max(70, listHeight));
+
         HistoryChart.SizeChanged += (_, _) => DrawHistory();
         HistoryChart.LostMouseCapture += (_, _) => { if (_pressX != null) CancelSelection(); EndPan(); }; // capture taken away mid-press
         HistoryNavigator.SizeChanged += (_, _) => DrawNavigator();
@@ -348,18 +351,18 @@ public partial class MainWindow
         _cursorLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextPrimary");
         c.Children.Add(_cursorLine);
 
-        // A dot that rides the curve under the cursor, with the value beside it.
+        // A dot that rides the curve under the cursor, with a card beside it: the value and the apps behind it.
         _cursorDot = new Ellipse { Width = 9, Height = 9, Fill = new SolidColorBrush(accent), StrokeThickness = 2, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
         _cursorDot.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Surface"); // CardBackground is transparent in some themes
         c.Children.Add(_cursorDot);
-        var cursorText = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold };
-        cursorText.SetResourceReference(TextBlock.ForegroundProperty, "OnAccent"); // white was unreadable on the lighter accents
         _cursorValue = new Border
         {
-            Background = new SolidColorBrush(Alpha(accent, 0xE6)), Padding = new Thickness(6, 1, 6, 2),
-            Child = cursorText, Visibility = Visibility.Collapsed, IsHitTestVisible = false,
+            Padding = new Thickness(12, 8, 12, 8), BorderThickness = new Thickness(1), Width = 250,
+            Child = new StackPanel(), Visibility = Visibility.Collapsed, IsHitTestVisible = false,
         };
-        _cursorValue.SetResourceReference(Border.CornerRadiusProperty, "PillRadius");
+        _cursorValue.SetResourceReference(Border.BackgroundProperty, "SurfaceElevated");
+        _cursorValue.SetResourceReference(Border.BorderBrushProperty, "ButtonBorder");
+        _cursorValue.SetResourceReference(Border.CornerRadiusProperty, "PopupRadius");
         c.Children.Add(_cursorValue);
         // A live refresh or a drag frame rebuilds the chart: put the pin (or the resting mouse's cursor) back.
         if (_pinnedUtc is DateTime pin && pin >= fromUtc && pin <= _historyTo.ToUniversalTime()) PlaceCursor(X(pin), pinned: true);
@@ -847,12 +850,6 @@ public partial class MainWindow
     /// <summary>The readings and the running apps at a moment, in the panel under the chart.</summary>
     private void ShowDetailsAt(DateTime time, bool pinned)
     {
-        if (_histProcsDirty)
-        {
-            _histProcs = _hist.Processes.GroupBy(p => p.Time).ToDictionary(g => g.Key, g => g.ToList());
-            _histProcTimes = _histProcs.Keys.OrderBy(t => t).ToList();
-            _histProcsDirty = false;
-        }
         double span = (_historyTo - _historyFrom).TotalSeconds;
         double tolerance = Math.Max(_historyMinutely ? 90 : 3, span / Math.Max(1, HistoryChart.ActualWidth) * 3);
         string prefix = pinned ? "PINNED · " : "", suffix = pinned ? "   (click the line to unpin)" : "";
@@ -863,10 +860,7 @@ public partial class MainWindow
         else
             HistoryCursorTitle.Text = $"{prefix}{time.ToLocalTime():ddd HH:mm:ss} — nothing recorded{suffix}";
 
-        if (_histProcTimes.Count == 0) { HistoryCursorList.ItemsSource = null; return; }
-        var at = Nearest(_histProcTimes, time, t => t);
-        if (Math.Abs((at - time).TotalSeconds) > Math.Max(60, tolerance)) { HistoryCursorList.ItemsSource = null; return; }
-        HistoryCursorList.ItemsSource = _histProcs[at].OrderByDescending(p => _historyMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, _ => p.Cpu })
+        HistoryCursorList.ItemsSource = ProcessesAt(time, tolerance)?.OrderByDescending(MetricOf)
             .Select(p => new OptionItem
             {
                 Name = p.Name,
@@ -875,7 +869,26 @@ public partial class MainWindow
             }).ToList();
     }
 
-    /// <summary>Puts the dot on the curve at the cursor's column, the value in a bubble beside it.</summary>
+    private float MetricOf(ProcSample p) => _historyMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, _ => p.Cpu };
+
+    /// <summary>The apps recorded nearest a moment (every 10 s, every 2 s in a spike), or null if none is close.</summary>
+    private List<ProcSample>? ProcessesAt(DateTime time, double tolerance)
+    {
+        if (_histProcsDirty)
+        {
+            _histProcs = _hist.Processes.GroupBy(p => p.Time).ToDictionary(g => g.Key, g => g.ToList());
+            _histProcTimes = _histProcs.Keys.OrderBy(t => t).ToList();
+            _histProcsDirty = false;
+        }
+        if (_histProcTimes.Count == 0) return null;
+        var at = Nearest(_histProcTimes, time, t => t);
+        return Math.Abs((at - time).TotalSeconds) > Math.Max(60, tolerance) ? null : _histProcs[at];
+    }
+
+    /// <summary>
+    /// Puts the dot on the curve at the cursor's column and the card beside it, AppControl-style: the moment,
+    /// the temperature and the value, then the five apps using the most of this metric then, and the rest.
+    /// </summary>
     private void MoveCursorDot(double x)
     {
         if (_cursorDot == null || _cursorValue == null || _chartPeaks.Length == 0) return;
@@ -887,13 +900,63 @@ public partial class MainWindow
         Canvas.SetLeft(_cursorDot, cx - _cursorDot.Width / 2);
         Canvas.SetTop(_cursorDot, cy - _cursorDot.Height / 2);
         float temp = b < _chartTemps.Length ? _chartTemps[b] : float.NaN;
-        ((TextBlock)_cursorValue.Child).Text = float.IsNaN(temp) ? $"{v:0}%" : $"{v:0}% · {temp:0}°C";
-        _cursorValue.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        // Beside the dot, flipped to the left near the right edge so it never clips.
-        double bx = cx + 10 + _cursorValue.DesiredSize.Width > _chartWidth ? cx - 10 - _cursorValue.DesiredSize.Width : cx + 10;
-        Canvas.SetLeft(_cursorValue, bx);
-        Canvas.SetTop(_cursorValue, Math.Max(BadgeRow, cy - _cursorValue.DesiredSize.Height - 6));
+        FillCursorCard(TimeAt(x), v, temp);
+        // Beside the cursor, flipped to the left near the right edge. Its height isn't known until layout, so it
+        // hangs from the top when the curve is high and stands on the bottom (above the temperature band) when
+        // it's low — either way it stays inside the chart without measuring it.
+        double bx = x + 14 + _cursorValue.Width > _chartWidth ? x - 14 - _cursorValue.Width : x + 14;
+        Canvas.SetLeft(_cursorValue, Math.Max(4, bx));
+        double h = HistoryChart.ActualHeight;
+        if (cy > h / 2)
+        {
+            Canvas.SetTop(_cursorValue, double.NaN);
+            Canvas.SetBottom(_cursorValue, h - Math.Min(h - TempBand - 8, cy + 20));
+        }
+        else
+        {
+            Canvas.SetBottom(_cursorValue, double.NaN);
+            Canvas.SetTop(_cursorValue, Math.Max(BadgeRow, cy - 20));
+        }
         _cursorDot.Visibility = _cursorValue.Visibility = Visibility.Visible;
+    }
+
+    private void FillCursorCard(DateTime time, float value, float temp)
+    {
+        var rows = (StackPanel)_cursorValue!.Child;
+        rows.Children.Clear();
+        bool mem = _historyMetric == "mem";
+        string Amount(float v) => mem ? FormatMB(v) : v < 10 ? $"{v:0.0}%" : $"{v:0}%";
+
+        rows.Children.Add(CardRow(time.ToLocalTime().ToString(_historyMinutely ? "ddd d MMM HH:mm" : "ddd d MMM HH:mm:ss"),
+            (float.IsNaN(temp) ? "" : $"{temp:0}°C   ") + $"{value:0}%", secondary: true, bold: true, bottom: 6));
+
+        double span = (_historyTo - _historyFrom).TotalSeconds;
+        var apps = ProcessesAt(time, Math.Max(_historyMinutely ? 90 : 3, span / Math.Max(1, HistoryChart.ActualWidth) * 3));
+        if (apps == null) { rows.Children.Add(CardRow("No apps recorded near this moment", "", secondary: true)); return; }
+        var ranked = apps.Where(p => MetricOf(p) > 0).OrderByDescending(MetricOf).ToList();
+        foreach (var p in ranked.Take(5)) rows.Children.Add(CardRow(p.Name, Amount(MetricOf(p))));
+        // CPU and GPU shares add up to the total, so the rest is what the top five leave out; memory per app doesn't.
+        int more = Math.Max(0, ranked.Count - 5);
+        float rest = value - ranked.Take(5).Sum(MetricOf);
+        if (!mem && rest >= 1) rows.Children.Add(CardRow(more > 0 ? $"{more} more recorded and everything else" : "Everything else", $"{rest:0}%", secondary: true, top: 6));
+        else if (more > 0) rows.Children.Add(CardRow($"{more} more recorded, listed below", "", secondary: true, top: 6));
+    }
+
+    private static Grid CardRow(string label, string value, bool secondary = false, bool bold = false, double top = 0, double bottom = 0)
+    {
+        var row = new Grid { Margin = new Thickness(0, top + 2, 0, bottom + 2) };
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var weight = bold ? FontWeights.SemiBold : FontWeights.Normal;
+        var name = new TextBlock { Text = label, FontSize = 11, FontWeight = weight, TextTrimming = TextTrimming.CharacterEllipsis };
+        var amount = new TextBlock { Text = value, FontSize = 11, FontWeight = weight, Margin = new Thickness(10, 0, 0, 0) };
+        System.Windows.Documents.Typography.SetNumeralAlignment(amount, FontNumeralAlignment.Tabular);
+        name.SetResourceReference(TextBlock.ForegroundProperty, secondary ? "TextSecondary" : "TextPrimary");
+        amount.SetResourceReference(TextBlock.ForegroundProperty, secondary ? "TextSecondary" : "TextPrimary");
+        Grid.SetColumn(amount, 1);
+        row.Children.Add(name);
+        row.Children.Add(amount);
+        return row;
     }
 
     private static T Nearest<T>(List<T> sorted, DateTime time, Func<T, DateTime> timeOf)
@@ -1122,6 +1185,12 @@ public partial class MainWindow
         _animateChart = true;
         _historyEnd = null;
         _ = LoadHistory();
+    }
+
+    private void HistorySplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer");
+        key.SetValue("HistoryListHeight", (int)HistoryListsRow.ActualHeight, RegistryValueKind.DWord);
     }
 
     private void NavigatorSpan_Changed(object sender, SelectionChangedEventArgs e)
