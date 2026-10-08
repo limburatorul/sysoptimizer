@@ -40,6 +40,8 @@ public partial class MainWindow
         };
         PrivacyList.IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) RefreshPrivacy(); }; // a pill under Processes
         InitHistory();
+        InitEvents();
+        InitRemote();
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
 
@@ -82,7 +84,8 @@ public partial class MainWindow
 
         var now = DateTime.UtcNow;
         var sample = new SysSample(now, (float)snap.CpuPercent, (float)snap.MemPercent,
-            snap.GpuAvailable ? (float)snap.GpuPercent : float.NaN, (float)snap.CpuTempC, (float)snap.GpuTempC);
+            snap.GpuAvailable ? (float)snap.GpuPercent : float.NaN, (float)snap.CpuTempC, (float)snap.GpuTempC,
+            (float)snap.Disks.Sum(d => d.ReadMBs + d.WriteMBs), (float)snap.Nets.Sum(n => n.DownMbps + n.UpMbps));
         var top = historyTick && processes != null
             ? ProcessMonitor.ForHistory(processes).Select(p => new ProcSample(now, p.Name, (float)p.Cpu, (float)p.RamMB, (float)p.Gpu)).ToList()
             : null;
@@ -98,6 +101,7 @@ public partial class MainWindow
             _historyWriteFailed = true;
         }
 
+        CheckAlerts(snap, processes);
         if (processesShown && processes != null) UpdateProcessRows();
         if (PrivacyList.IsVisible && _tick % 5 == 0) RefreshPrivacy();
         if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _pan == null && _tick % 10 == 0) _ = LoadHistory();
@@ -123,7 +127,11 @@ public partial class MainWindow
         var apps = processes.Where(p => p.Path != null && !p.Path.StartsWith(windows, StringComparison.OrdinalIgnoreCase))
                             .Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, firstSeen) in _newApps)
-            if (apps.Contains(name)) HistoryStore.WriteEvent("launch", name, firstSeen);
+            if (apps.Contains(name))
+            {
+                HistoryStore.WriteEvent("launch", name, firstSeen);
+                CheckLaunchSignature(name, processes.First(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)).Path);
+            }
         _newApps = _runningApps == null
             ? new(StringComparer.OrdinalIgnoreCase)
             : apps.Where(a => !_runningApps.Contains(a)).ToDictionary(a => a, _ => DateTime.UtcNow, StringComparer.OrdinalIgnoreCase);

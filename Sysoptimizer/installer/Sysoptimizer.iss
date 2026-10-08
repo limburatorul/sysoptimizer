@@ -95,6 +95,7 @@ var
 begin
   if CurUninstallStep <> usUninstall then Exit;
   Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "{#AppName}" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="Sysoptimizer remote monitoring"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if RegGetSubkeyNames(HKLM64, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options', Names) then
     for I := 0 to GetArrayLength(Names) - 1 do
     begin

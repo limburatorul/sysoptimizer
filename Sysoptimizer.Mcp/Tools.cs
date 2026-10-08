@@ -12,7 +12,7 @@ public static class Tools
     private const string RangeHelp = "Time range: either last_minutes, or from/to as local ISO date-times like 2026-10-05T14:00. Default: the last 60 minutes.";
     private const string SampleNote = "Only the heaviest apps are recorded each time (top by CPU, memory and GPU every 10 s), so small background apps may be missing.";
 
-    private static readonly string[] Metrics = { "cpu", "mem", "gpu", "cpu_temp", "gpu_temp" };
+    private static readonly string[] Metrics = { "cpu", "mem", "gpu", "cpu_temp", "gpu_temp", "disk", "net" };
 
     // The params constructor, not a collection initializer: the initializer binds to the generic Add<T>,
     // which the trimmer (rightly, in general) flags as unsafe.
@@ -27,7 +27,7 @@ public static class Tools
         Tool("find_spikes", $"Find periods when a metric went above a threshold, and which apps were running then — answers 'what made my PC slow/loud/hot at …'. {RangeHelp}", RangeProps(new JsonObject
         {
             ["metric"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(Metrics.Select(m => (JsonNode)m).ToArray()), ["description"] = "Which metric (default cpu)." },
-            ["threshold"] = new JsonObject { ["type"] = "number", ["description"] = "Percent for usage, °C for temperatures. Default 80 (85 for temperatures)." },
+            ["threshold"] = new JsonObject { ["type"] = "number", ["description"] = "Percent for usage, °C for temperatures, MB/s for disk, Mbps for network. Default 80 (85 for temperatures)." },
             ["min_seconds"] = new JsonObject { ["type"] = "integer", ["description"] = "Ignore spikes shorter than this (default 3)." },
         })),
         Tool("get_app_history", $"When a given app was running and how much it used, session by session. {SampleNote} {RangeHelp}", RangeProps(new JsonObject
@@ -92,7 +92,8 @@ public static class Tools
         var s = system[^1];
         var sb = new StringBuilder();
         sb.AppendLine($"As of {Local(s.Time)} ({Ago(s.Time)}):");
-        sb.AppendLine($"CPU {Pct(s.Cpu)} · Memory {Pct(s.Mem)} · GPU {Pct(s.Gpu)} · CPU {Deg(s.CpuTemp)} · GPU {Deg(s.GpuTemp)}");
+        sb.AppendLine($"CPU {Pct(s.Cpu)} · Memory {Pct(s.Mem)} · GPU {Pct(s.Gpu)} · CPU {Deg(s.CpuTemp)} · GPU {Deg(s.GpuTemp)}"
+            + (float.IsNaN(s.DiskMBs) ? "" : $" · disk {Fmt(s.DiskMBs, "disk")} · network {Fmt(s.NetMbps, "net")}"));
         if (processes.Count > 0)
         {
             var latest = processes.Max(p => p.Time);
@@ -128,7 +129,7 @@ public static class Tools
             var start = from.AddSeconds(bucket.Key * size);
             string Avg(string m) => bucket.Any(s => !float.IsNaN(Value(s, m))) ? Fmt(bucket.Where(s => !float.IsNaN(Value(s, m))).Average(s => Value(s, m)), m) : "—";
             string Max(string m) => bucket.Any(s => !float.IsNaN(Value(s, m))) ? Fmt(bucket.Where(s => !float.IsNaN(Value(s, m))).Max(s => Value(s, m)), m) : "—";
-            sb.AppendLine($"{start:HH:mm}  CPU {Avg("cpu")}/{Max("cpu")} · MEM {Avg("mem")} · GPU {Avg("gpu")}/{Max("gpu")} · temps peak CPU {Max("cpu_temp")} GPU {Max("gpu_temp")}");
+            sb.AppendLine($"{start:HH:mm}  CPU {Avg("cpu")}/{Max("cpu")} · MEM {Avg("mem")} · GPU {Avg("gpu")}/{Max("gpu")} · temps peak CPU {Max("cpu_temp")} GPU {Max("gpu_temp")} · disk peak {Max("disk")} · net peak {Max("net")}");
         }
         return sb.ToString();
     }
@@ -283,15 +284,19 @@ public static class Tools
 
     private static float Value(SysSample s, string metric) => metric switch
     {
-        "mem" => s.Mem, "gpu" => s.Gpu, "cpu_temp" => s.CpuTemp, "gpu_temp" => s.GpuTemp, _ => s.Cpu,
+        "mem" => s.Mem, "gpu" => s.Gpu, "cpu_temp" => s.CpuTemp, "gpu_temp" => s.GpuTemp, "disk" => s.DiskMBs, "net" => s.NetMbps, _ => s.Cpu,
     };
 
     private static string Label(string metric) => metric switch
     {
-        "mem" => "Memory", "gpu" => "GPU", "cpu_temp" => "CPU temperature", "gpu_temp" => "GPU temperature", _ => "CPU",
+        "mem" => "Memory", "gpu" => "GPU", "cpu_temp" => "CPU temperature", "gpu_temp" => "GPU temperature",
+        "disk" => "Disk (read + write)", "net" => "Network (down + up)", _ => "CPU",
     };
 
-    private static string Fmt(double v, string metric) => metric.EndsWith("temp") ? $"{v:0}°C" : $"{v:0}%";
+    private static string Fmt(double v, string metric) => metric switch
+    {
+        "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", _ when metric.EndsWith("temp") => $"{v:0}°C", _ => $"{v:0}%",
+    };
     private static string Pct(float v) => float.IsNaN(v) ? "n/a" : $"{v:0}%";
     private static string Deg(float v) => float.IsNaN(v) ? "n/a" : $"{v:0}°C";
     private static string MB(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";

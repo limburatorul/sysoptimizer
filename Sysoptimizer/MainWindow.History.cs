@@ -138,8 +138,8 @@ public partial class MainWindow
 
         (_historyFrom, _historyTo, _historyMinutely, _hist) = (from, to, minutely, data);
         _histProcsDirty = true;
-        HistoryRangeText.Text = $"{from:ddd d MMM HH:mm} – {to:ddd d MMM HH:mm}"
-            + (!complete ? " · loading…" : data.System.Count == 0 ? " · nothing recorded" : "")
+        HistoryRangeText.Text = (_source != null ? $"{_source.Name} · " : "") + $"{from:ddd d MMM HH:mm} – {to:ddd d MMM HH:mm}"
+            + (_sourceError != null ? $" · {_source?.Name ?? "history"}: {_sourceError}" : !complete ? " · loading…" : data.System.Count == 0 ? " · nothing recorded" : "")
             + (minutely ? " · per-minute peaks (click to zoom in to every second)" : "");
         DrawHistory();
         if (final || complete) UpdateRangeList(); // skipped mid-drag only while a day is still loading
@@ -162,10 +162,13 @@ public partial class MainWindow
     {
         var key = (day, minutely);
         if (!_dayLoading.Add(key)) return;
-        Task.Run(() => HistoryStore.ReadDay(day, minutely)).ContinueWith(t =>
+        var source = _source;
+        Task.Run(() => source?.ReadDay(day, minutely) ?? HistoryStore.ReadDay(day, minutely)).ContinueWith(t =>
         {
+            if (source != _source) return; // the view switched PCs while this was on its way
             _dayLoading.Remove(key);
-            if (t.IsCompletedSuccessfully) _dayCache[key] = (t.Result, DateTime.Now);
+            if (t.IsCompletedSuccessfully) { _dayCache[key] = (t.Result, DateTime.Now); _sourceError = null; }
+            else _sourceError = t.Exception?.InnerException?.Message; // shown under the chart; the next refresh retries
             TrimDayCache();
             if (_historyFrom.Date <= day && day <= _historyTo.Date) ShowRange(_historyFrom, _historyTo, final: !_navDragging);
         }, TaskScheduler.FromCurrentSynchronizationContext());
@@ -202,7 +205,13 @@ public partial class MainWindow
     private async Task RefreshNavigator(DateTime from, DateTime to)
     {
         var now = DateTime.Now;
-        double spanH = _navHours > 0 ? _navHours : Math.Max(1, (now - (HistoryStore.OldestDay() ?? now.Date)).TotalHours);
+        var source = _source;
+        DateTime? oldest = null;
+        if (_navHours <= 0)
+            try { oldest = await Task.Run(() => source?.OldestDay() ?? HistoryStore.OldestDay()); }
+            catch (RemoteHistoryException) { } // the chart's own caption says the PC can't be reached
+        if (source != _source) return;
+        double spanH = _navHours > 0 ? _navHours : Math.Max(1, (now - (oldest ?? now.Date)).TotalHours);
         spanH = Math.Max(spanH, (to - from).TotalHours * 1.25); // the window must fit, with room to move
         var navTo = now;
         var navFrom = now.AddHours(-spanH);
@@ -221,22 +230,66 @@ public partial class MainWindow
             try
             {
                 bool perSecond = spanH <= 6;
-                _navData = await Task.Run(() => perSecond ? HistoryStore.Read(navFrom, navTo).System : HistoryStore.ReadMinutes(navFrom, navTo, systemOnly: true).System);
-                (_navFrom, _navTo, _navLoadedAt) = (navFrom, navTo, DateTime.Now);
+                var data = await Task.Run(() => source != null
+                    ? (perSecond ? source.Read(navFrom, navTo) : source.ReadMinutes(navFrom, navTo)).System
+                    : perSecond ? HistoryStore.Read(navFrom, navTo).System : HistoryStore.ReadMinutes(navFrom, navTo, systemOnly: true).System);
+                if (source != _source) return;
+                (_navData, _navFrom, _navTo, _navLoadedAt) = (data, navFrom, navTo, DateTime.Now);
             }
+            catch (RemoteHistoryException) { } // shown in the chart's caption; the strip keeps what it had
             finally { _historyLoading = false; }
         }
         if (!_navDragging) DrawNavigator();
     }
 
     private static string FormatMB(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";
-    private string MetricLabel() => _historyMetric switch { "mem" => "Memory", "gpu" => "GPU", _ => "CPU" };
-    private string SortKey() => _historyMetric switch { "mem" => "ram", "gpu" => "gpu", _ => "cpu" };
-    private float Metric(SysSample s) => _historyMetric switch { "mem" => s.Mem, "gpu" => s.Gpu, _ => s.Cpu };
+    // The app lists rank by CPU on the Disk and Network views: per-app disk and network use isn't recorded.
+    private string ListMetric => _historyMetric is "disk" or "net" ? "cpu" : _historyMetric;
+    private string MetricLabel() => ListMetric switch { "mem" => "Memory", "gpu" => "GPU", _ => "CPU" };
+    private string SortKey() => ListMetric switch { "mem" => "ram", "gpu" => "gpu", _ => "cpu" };
+
+    private string? _historyApp; // null = the whole PC; otherwise the chart plots this one app
+    private double _scale = 100;  // what the chart's full height stands for, in the metric's own unit
+
+    /// <summary>Percent metrics fill a fixed 0-100 %; disk, network and an app's memory scale to what's on screen.</summary>
+    private bool InPercent => _historyApp == null ? _historyMetric is "cpu" or "mem" or "gpu" : _historyMetric != "mem";
+    private static float Raw(SysSample s, string metric) => metric switch
+    {
+        "mem" => s.Mem, "gpu" => s.Gpu, "disk" => s.DiskMBs, "net" => s.NetMbps, _ => s.Cpu,
+    };
+    /// <summary>The plotted value, 0-100 of the chart's height.</summary>
+    private float Metric(SysSample s) => (float)(Raw(s, _historyMetric) / _scale * 100);
+    private string FormatValue(double v) => InPercent
+        ? (v < 10 ? $"{v:0.0}%" : $"{v:0}%")
+        : _historyMetric switch { "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", _ => FormatMB(v) };
+
+    /// <summary>1, 2 or 5 × a power of ten, at least the value: a scale whose labels read cleanly.</summary>
+    private static double NiceCeiling(double max)
+    {
+        if (!(max > 0)) return 1;
+        double step = Math.Pow(10, Math.Floor(Math.Log10(max)));
+        foreach (var k in new[] { 1.0, 2, 5 }) if (k * step >= max) return k * step;
+        return 10 * step;
+    }
+
+    /// <summary>
+    /// One app's line, from the process snapshots (every 10 s, every 2 s in a spike): its CPU, RAM and GPU
+    /// in the Cpu/Mem/Gpu slots. Only the busiest apps are recorded in each snapshot, so a snapshot without
+    /// it counts as 0 — it was too idle to make the list.
+    /// </summary>
+    private List<SysSample> AppSeries(string app)
+    {
+        EnsureProcessIndex();
+        return _histProcTimes.Select(t =>
+        {
+            var p = _histProcs[t].Find(x => string.Equals(x.Name, app, StringComparison.OrdinalIgnoreCase));
+            return p.Name == null ? new SysSample(t, 0, 0, 0, float.NaN, float.NaN) : new SysSample(t, p.Cpu, p.RamMB, p.Gpu, float.NaN, float.NaN);
+        }).ToList();
+    }
     private float MetricTemp(SysSample s) => _historyMetric == "gpu" ? s.GpuTemp : s.CpuTemp;
 
     private Color ThemeColor(string key, Color fallback) => (TryFindResource(key) as SolidColorBrush)?.Color ?? fallback;
-    private Color MetricColor() => ThemeColor(_historyMetric switch { "mem" => "AccentMem", "gpu" => "AccentGpu", _ => "AccentCpu" }, Colors.SteelBlue);
+    private Color MetricColor() => ThemeColor(_historyMetric switch { "mem" or "net" => "AccentMem", "gpu" => "AccentGpu", _ => "AccentCpu" }, Colors.SteelBlue);
     private static readonly Color Hot = Color.FromRgb(0xEF, 0x44, 0x44), Warm = Color.FromRgb(0xF9, 0x73, 0x16), Cool = Color.FromRgb(0x5B, 0x6B, 0xD8);
     private static Color Alpha(Color c, byte a) => Color.FromArgb(a, c.R, c.G, c.B);
 
@@ -272,15 +325,18 @@ public partial class MainWindow
         double X(DateTime utc) => (utc - fromUtc).TotalSeconds / span * w;
         double Y(double v) => bottom - Math.Clamp(v, 0, 100) / 100 * plotH;
 
-        foreach (var (v, text) in new[] { (100.0, "100%"), (50.0, "50%"), (0.0, "0%") })
+        var samples = _historyApp == null ? _hist.System : AppSeries(_historyApp);
+        _scale = InPercent ? 100 : NiceCeiling(samples.Select(x => Raw(x, _historyMetric)).Where(v => !float.IsNaN(v)).DefaultIfEmpty(0).Max());
+        foreach (var (v, text) in new[] { (100.0, FormatValue(_scale)), (50.0, FormatValue(_scale / 2)), (0.0, InPercent ? "0%" : "0") })
         {
             var grid = new Line { X1 = 0, X2 = w, Y1 = Y(v), Y2 = Y(v), StrokeThickness = 1, Opacity = 0.15 };
             grid.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
             c.Children.Add(grid);
-            Place(c, Label(text, 9), w - 30, Y(v) - (v == 100 ? -1 : 13));
+            var label = Label(text, 9);
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Place(c, label, w - label.DesiredSize.Width - 6, Y(v) - (v == 100 ? -1 : 13));
         }
 
-        var samples = _hist.System;
         // Never more columns than recorded samples: zoomed to a minute, 3px columns would be 0.2 s wide and
         // most would hold nothing, breaking the curve into needles between the 1-second readings.
         double resolution = _historyMinutely ? 60 : 1;
@@ -291,7 +347,7 @@ public partial class MainWindow
         // when Sysoptimizer simply wasn't running. Includes the stretch before the first sample.
         var gaps = new List<(DateTime A, DateTime B)>();
         var previous = fromUtc;
-        foreach (var s in samples)
+        foreach (var s in _hist.System) // the PC's own record says when it was off or asleep, in app view too
         {
             if ((s.Time - previous).TotalSeconds > gapLimit) gaps.Add((previous, s.Time));
             previous = s.Time;
@@ -302,11 +358,13 @@ public partial class MainWindow
 
         // The metric as each 4px column's peak — a spike survives any zoom level (see SmoothRuns).
         var peaks = Bucket(samples, Metric, cols);
-        int bridge = (int)(gapLimit / cols.Seconds);
+        // An app's line comes from the snapshots, 10 s apart: bridge across them, not just a skipped second.
+        int bridge = (int)((_historyApp != null && !_historyMinutely ? Math.Max(25, gapLimit) : gapLimit) / cols.Seconds);
         BridgeShortGaps(peaks, bridge);
         var accent = MetricColor();
         // Colour follows height: the theme accent at rest, its warning colour from ~70%, its bad colour near 100%.
         Color hot = ThemeColor("StatusBad", Hot), warm = ThemeColor("StatusWarn", Warm);
+        if (!InPercent) hot = warm = accent; // the top of an auto-scaled chart is just "the most in view", not alarming
         LinearGradientBrush Heat(byte hotA, byte warmA, byte restA, byte floorA) => new(new GradientStopCollection
         {
             new(Alpha(hot, hotA), 0), new(Alpha(warm, warmA), 0.3), new(Alpha(accent, restA), 0.5), new(Alpha(accent, floorA), 1),
@@ -317,7 +375,7 @@ public partial class MainWindow
             Data = SmoothRuns(peaks, cols, Y, baseline: null), Stroke = Heat(0xFF, 0xFF, 0xFF, 0xFF), StrokeThickness = 2,
             StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, IsHitTestVisible = false,
         };
-        linePath.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" => "LineGlowMem", "gpu" => "LineGlowGpu", _ => "LineGlowCpu" });
+        linePath.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" or "net" => "LineGlowMem", "gpu" => "LineGlowGpu", _ => "LineGlowCpu" });
         c.Children.Add(areaPath);
         c.Children.Add(linePath);
         (_chartPeaks, _chartWidth, _chartY, _chartCols) = (peaks, w, Y, cols);
@@ -785,7 +843,7 @@ public partial class MainWindow
         _historyEnd = to >= DateTime.Now.AddSeconds(-30) ? null : to;
         _frozeForPin = false;
         ClearRangePills();
-        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move";
+        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move · click an app below to chart it";
         _ = LoadHistory();
     }
 
@@ -869,17 +927,20 @@ public partial class MainWindow
             }).ToList();
     }
 
-    private float MetricOf(ProcSample p) => _historyMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, _ => p.Cpu };
+    private float MetricOf(ProcSample p) => ListMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, _ => p.Cpu };
+
+    private void EnsureProcessIndex()
+    {
+        if (!_histProcsDirty) return;
+        _histProcs = _hist.Processes.GroupBy(p => p.Time).ToDictionary(g => g.Key, g => g.ToList());
+        _histProcTimes = _histProcs.Keys.OrderBy(t => t).ToList();
+        _histProcsDirty = false;
+    }
 
     /// <summary>The apps recorded nearest a moment (every 10 s, every 2 s in a spike), or null if none is close.</summary>
     private List<ProcSample>? ProcessesAt(DateTime time, double tolerance)
     {
-        if (_histProcsDirty)
-        {
-            _histProcs = _hist.Processes.GroupBy(p => p.Time).ToDictionary(g => g.Key, g => g.ToList());
-            _histProcTimes = _histProcs.Keys.OrderBy(t => t).ToList();
-            _histProcsDirty = false;
-        }
+        EnsureProcessIndex();
         if (_histProcTimes.Count == 0) return null;
         var at = Nearest(_histProcTimes, time, t => t);
         return Math.Abs((at - time).TotalSeconds) > Math.Max(60, tolerance) ? null : _histProcs[at];
@@ -924,21 +985,33 @@ public partial class MainWindow
     {
         var rows = (StackPanel)_cursorValue!.Child;
         rows.Children.Clear();
-        bool mem = _historyMetric == "mem";
+        bool mem = ListMetric == "mem";
         string Amount(float v) => mem ? FormatMB(v) : v < 10 ? $"{v:0.0}%" : $"{v:0}%";
+        double raw = value * _scale / 100;
 
         rows.Children.Add(CardRow(time.ToLocalTime().ToString(_historyMinutely ? "ddd d MMM HH:mm" : "ddd d MMM HH:mm:ss"),
-            (float.IsNaN(temp) ? "" : $"{temp:0}°C   ") + $"{value:0}%", secondary: true, bold: true, bottom: 6));
+            (float.IsNaN(temp) ? "" : $"{temp:0}°C   ") + FormatValue(raw), secondary: true, bold: true, bottom: 6));
 
         double span = (_historyTo - _historyFrom).TotalSeconds;
         var apps = ProcessesAt(time, Math.Max(_historyMinutely ? 90 : 3, span / Math.Max(1, HistoryChart.ActualWidth) * 3));
         if (apps == null) { rows.Children.Add(CardRow("No apps recorded near this moment", "", secondary: true)); return; }
+        if (_historyApp != null)
+        {
+            var p = apps.Find(x => string.Equals(x.Name, _historyApp, StringComparison.OrdinalIgnoreCase));
+            if (p.Name == null) { rows.Children.Add(CardRow($"{_historyApp} was idle or not running", "", secondary: true)); return; }
+            rows.Children.Add(CardRow("CPU", $"{p.Cpu:0.0}%"));
+            rows.Children.Add(CardRow("Memory", FormatMB(p.RamMB)));
+            rows.Children.Add(CardRow("GPU", $"{p.Gpu:0.0}%"));
+            return;
+        }
+        if (_historyMetric is "disk" or "net")
+            rows.Children.Add(CardRow(_historyMetric == "disk" ? "Per-app disk use isn't recorded — top CPU:" : "Per-app network use isn't recorded — top CPU:", "", secondary: true, bottom: 2));
         var ranked = apps.Where(p => MetricOf(p) > 0).OrderByDescending(MetricOf).ToList();
         foreach (var p in ranked.Take(5)) rows.Children.Add(CardRow(p.Name, Amount(MetricOf(p))));
         // CPU and GPU shares add up to the total, so the rest is what the top five leave out; memory per app doesn't.
         int more = Math.Max(0, ranked.Count - 5);
         float rest = value - ranked.Take(5).Sum(MetricOf);
-        if (!mem && rest >= 1) rows.Children.Add(CardRow(more > 0 ? $"{more} more recorded and everything else" : "Everything else", $"{rest:0}%", secondary: true, top: 6));
+        if (!mem && _historyMetric is "cpu" or "gpu" && rest >= 1) rows.Children.Add(CardRow(more > 0 ? $"{more} more recorded and everything else" : "Everything else", $"{rest:0}%", secondary: true, top: 6));
         else if (more > 0) rows.Children.Add(CardRow($"{more} more recorded, listed below", "", secondary: true, top: 6));
     }
 
@@ -998,7 +1071,10 @@ public partial class MainWindow
         }
 
         var navCols = MakeColumns(fromUtc, span, w, Math.Max(1, (int)(w / 3)));
-        var peaks = Bucket(_navData, Metric, navCols);
+        string navMetric = _historyMetric;
+        double navScale = navMetric is "disk" or "net"
+            ? NiceCeiling(_navData.Select(x => Raw(x, navMetric)).Where(v => !float.IsNaN(v)).DefaultIfEmpty(0).Max()) : 100;
+        var peaks = Bucket(_navData, x => (float)(Raw(x, navMetric) / navScale * 100), navCols);
         var navColor = MetricColor();
         c.Children.Add(new Path
         {
@@ -1163,6 +1239,28 @@ public partial class MainWindow
         _animateChart = true;
         if (sender is RadioButton { Tag: string metric }) _historyMetric = metric;
         if (IsLoaded) _ = LoadHistory();
+    }
+
+    /// <summary>A row in the lists under the chart was clicked: chart that one app (its CPU, memory or GPU).</summary>
+    private void HistoryApp_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: OptionItem { Name: { } app } } || app.Length == 0) return;
+        _historyApp = app;
+        if (_historyMetric is "disk" or "net") HistoryMetricCpu.IsChecked = true; // per app, only these were recorded
+        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = false;
+        HistoryAppChip.Content = $"{app}  ✕";
+        HistoryAppChip.Visibility = Visibility.Visible;
+        _animateChart = true;
+        DrawHistory();
+    }
+
+    private void HistoryAppClear_Click(object sender, RoutedEventArgs e)
+    {
+        _historyApp = null;
+        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = true;
+        HistoryAppChip.Visibility = Visibility.Collapsed;
+        _animateChart = true;
+        DrawHistory();
     }
 
     private void HistoryPrev_Click(object sender, RoutedEventArgs e)
