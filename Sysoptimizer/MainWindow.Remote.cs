@@ -70,7 +70,7 @@ public partial class MainWindow
         if (RemoteCrypto.ParseKey(RemoteKeyBox.Text) == null) RemoteKeyBox.Text = RemoteCrypto.NewKey();
         try
         {
-            _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!);
+            _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, () => _liveJson);
         }
         catch (HttpListenerException ex)
         {
@@ -149,7 +149,7 @@ public partial class MainWindow
             using (var key = Registry.CurrentUser.CreateSubKey(RemotePcsKey))
                 key.SetValue(name, $"{address}|{port}|{RemoteAddKeyBox.Text.Trim()}");
             RemoteAddKeyBox.Clear();
-            RemoteAddStatus.Text = $"Added {name}. Pick it as the source in History.";
+            RemoteAddStatus.Text = $"Added {name}. Pick it under Showing, in the bar at the bottom.";
             RefreshRemoteLists();
         }
         catch (RemoteHistoryException ex) { RemoteAddStatus.Text = $"{address}: {ex.Message}."; }
@@ -176,7 +176,7 @@ public partial class MainWindow
                                           ?? HistorySourceCombo.Items[0];
     }
 
-    /// <summary>History and Events now read another PC (or this one again): start from a clean slate.</summary>
+    /// <summary>Every tab now shows another PC (or this one again): start from a clean slate.</summary>
     private void HistorySource_Changed(object sender, SelectionChangedEventArgs e)
     {
         var source = (HistorySourceCombo.SelectedItem as ComboBoxItem)?.Tag as RemoteHistory;
@@ -188,6 +188,10 @@ public partial class MainWindow
         _navData = new();
         _navLoadedAt = DateTime.MinValue;
         RetentionCombo.IsEnabled = source == null; // retention is this PC's own setting
+        Title = source == null ? "Sysoptimizer" : $"Sysoptimizer — watching {source.Name}";
+        // What acts on this PC (health, cleanup, freeing memory) has no place while another one is shown.
+        HealthCardBorder.Visibility = FreeMemoryButton.Visibility = source == null ? Visibility.Visible : Visibility.Collapsed;
+        ResetLiveGraphs();
         if (_historyApp != null) HistoryAppClear_Click(this, new RoutedEventArgs());
         if (!IsLoaded) return;
         _animateChart = true;

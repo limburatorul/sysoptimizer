@@ -725,9 +725,15 @@ public partial class MainWindow
 
     private void HistoryChart_MouseRightUp(object sender, MouseButtonEventArgs e)
     {
-        if (_pan == null) return;
+        if (_pan is not var (startX, _, _)) return;
         e.Handled = true;
-        EndPan();
+        if (Math.Abs(e.GetPosition(HistoryChart).X - startX) > DragThreshold) { EndPan(); return; }
+        // A right-click without a drag: let go of everything chosen — the app, the pinned moment.
+        _pan = null;
+        HistoryChart.ReleaseMouseCapture();
+        HistoryChart.Cursor = Cursors.Cross;
+        if (_historyApp != null) HistoryAppClear_Click(this, new RoutedEventArgs());
+        if (_pinnedUtc != null) Unpin();
     }
 
     /// <summary>The range dragged by dx pixels — never past now — redrawn from the day cache.</summary>
@@ -843,7 +849,7 @@ public partial class MainWindow
         _historyEnd = to >= DateTime.Now.AddSeconds(-30) ? null : to;
         _frozeForPin = false;
         ClearRangePills();
-        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move · click an app below to chart it";
+        HistoryCursorTitle.Text = "Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · click an app below to chart it · right-drag to move, right-click to clear";
         _ = LoadHistory();
     }
 

@@ -111,7 +111,7 @@
                                             <TextBlock x:Name="MemPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
                                             <TextBlock x:Name="MemDetailText" Text="0 / 0 GB" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
-                                        <Button Content="Free memory" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,14,0" Padding="10,3" FontSize="11" Click="TrimMemory_Click"
+                                        <Button x:Name="FreeMemoryButton" Content="Free memory" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,14,0" Padding="10,3" FontSize="11" Click="TrimMemory_Click"
                                                 ToolTip="Trims every process's working set: its pages move to standby or the pagefile, and free RAM rises right away. Apps read back what they use next, so they can feel slower for a moment. It doesn't make Windows faster in general." />
                                     </Grid>
                                 </Border>
@@ -303,7 +303,6 @@
                             </Grid.RowDefinitions>
                             <DockPanel>
                                 <DockPanel DockPanel.Dock="Bottom" Height="46" Margin="0,8,0,0">
-                                    <ComboBox x:Name="HistorySourceCombo" DockPanel.Dock="Left" Width="130" Margin="0,0,8,0" VerticalAlignment="Center" SelectionChanged="HistorySource_Changed" AutomationProperties.Name="Whose history" ToolTip="Whose history: this PC, or one added under About → Remote monitoring" />
                                     <ComboBox x:Name="NavigatorSpanCombo" DockPanel.Dock="Left" Width="110" VerticalAlignment="Center" SelectionChanged="NavigatorSpan_Changed" AutomationProperties.Name="Overview span">
                                         <ComboBoxItem Content="1 hour" Tag="1" />
                                         <ComboBoxItem Content="2 hours" Tag="2" />
@@ -353,7 +352,7 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <DockPanel>
-                                    <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · right-drag to move · click an app below to chart it" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · click an app below to chart it · right-drag to move, right-click to clear" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextWrapping="Wrap" />
                                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                         <ItemsControl x:Name="HistoryCursorList" ItemTemplate="{StaticResource HistoryAppRowTemplate}" />
                                     </ScrollViewer>
@@ -782,7 +781,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Watch another PC" FontWeight="SemiBold" />
                                     <TextBlock Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"
-                                               Text="Its name or IP address, port and access key, as shown in the About tab on that PC. Then pick it as the source in History or Events." />
+                                               Text="Its name or IP address, port and access key, as shown in the About tab on that PC. Then pick it under Showing, in the bar at the bottom." />
                                     <WrapPanel>
                                         <StackPanel Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource CaseLabel}" Tag="Address" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
@@ -831,6 +830,8 @@
                         <RadioButton x:Name="ThemeStarTrek" Content="Star Trek" GroupName="Theme" Tag="StarTrek" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeStarCraft" Content="StarCraft" GroupName="Theme" Tag="StarCraft" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeCyberpunk" Content="Cyberpunk" GroupName="Theme" Tag="Cyberpunk" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
+                        <TextBlock Style="{StaticResource CaseLabel}" Tag="Showing" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
+                        <ComboBox x:Name="HistorySourceCombo" Width="150" VerticalAlignment="Center" SelectionChanged="HistorySource_Changed" AutomationProperties.Name="Which PC to show" ToolTip="This PC, or one added under About → Remote monitoring: Resources, Disks, Network, History and Events follow it" />
                     </StackPanel>
                 </DockPanel>
                 <ScrollViewer Style="{StaticResource GlassScrollViewer}" VerticalScrollBarVisibility="Auto">

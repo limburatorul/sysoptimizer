@@ -8,7 +8,7 @@ using Sysoptimizer.Services;
 // the app's "Watch another PC" against it.
 if (args is ["serve", var servePort, var serveKey])
 {
-    using var server = new HistoryServer(int.Parse(servePort), RemoteCrypto.ParseKey(serveKey) ?? throw new ArgumentException("not a key"), "localhost");
+    using var server = new HistoryServer(int.Parse(servePort), RemoteCrypto.ParseKey(serveKey) ?? throw new ArgumentException("not a key"), host: "localhost");
     Console.WriteLine($"Serving {HistoryStore.Folder} on localhost:{servePort} — Ctrl+C to stop.");
     Thread.Sleep(Timeout.Infinite);
 }
@@ -112,10 +112,11 @@ try
 
     int port;
     { var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); probe.Start(); port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; probe.Stop(); }
-    using (new HistoryServer(port, key, "localhost"))
+    using (new HistoryServer(port, key, () => "{\"CpuPercent\":42}"u8.ToArray(), "localhost"))
     {
         var client = new RemoteHistory("test", "localhost", port, key);
         Check(client.Hello() == Environment.MachineName, "remote: the server says who it is");
+        Check(client.Live().Contains("\"CpuPercent\":42"), "remote: the live reading arrives");
         var first = client.ReadDay(DateTime.Today, minutes: false);
         Check(first.System.Count == 1 && first.Events.Count == 1, "remote: today's lines arrive");
         // More of today, including a launch stamped earlier than the newest line (written ~10 s late).

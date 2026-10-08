@@ -86,11 +86,13 @@ public sealed class HistoryServer : IDisposable
     public const string Prefix = "/sysoptimizer/v1/";
     private readonly HttpListener _listener = new();
     private readonly byte[] _key;
+    private readonly Func<byte[]?>? _live;
 
+    /// <param name="live">The latest full reading (the Resources tab's), serialized; null until the first one.</param>
     /// <param name="host">"+" = every address (needs admin — the app always runs elevated); the self-test uses localhost.</param>
-    public HistoryServer(int port, byte[] key, string host = "+")
+    public HistoryServer(int port, byte[] key, Func<byte[]?>? live = null, string host = "+")
     {
-        _key = key;
+        (_key, _live) = (key, live);
         _listener.Prefixes.Add($"http://{host}:{port}{Prefix}");
         _listener.Start();
         _ = Task.Run(Loop);
@@ -120,7 +122,7 @@ public sealed class HistoryServer : IDisposable
                 response.StatusCode = 401; // no detail: the caller doesn't hold the key, or its clock is off
                 return;
             }
-            byte[]? body = Answer(request.Url!.AbsolutePath, request.QueryString);
+            byte[]? body = request.Url!.AbsolutePath.EndsWith("/live") ? _live?.Invoke() : Answer(request.Url.AbsolutePath, request.QueryString);
             if (body == null) { response.StatusCode = 400; return; }
             var sealedBody = RemoteCrypto.Seal(_key, $"{path}\n{time}", body);
             response.ContentType = "application/octet-stream";
@@ -189,6 +191,9 @@ public sealed class RemoteHistory
     private readonly object _gate = new();
 
     public RemoteHistory(string name, string address, int port, byte[] key) => (Name, Address, Port, _key) = (name, address, port, key);
+
+    /// <summary>The PC's latest full reading (what its own Resources tab shows), as JSON.</summary>
+    public string Live() => Get("live");
 
     /// <summary>Asks the PC who it is — the check made before a PC is added.</summary>
     public string Hello() => Get("info").Split('\n')[0];

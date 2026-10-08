@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -268,6 +270,35 @@ public partial class MainWindow : Window
             finally { thread.Priority = previous; }
         });
 
+        if (_server != null) _liveJson = JsonSerializer.SerializeToUtf8Bytes(snap, LiveJson);
+        if (_source == null) ShowSnapshot(snap);
+        else if (!_livePolling) _ = PollRemote(_source);
+        await OnResourceTick(snap); // this PC's own reading is always the one recorded and checked for alerts
+    }
+
+    private static readonly JsonSerializerOptions LiveJson = new() { NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals }; // NaN = unknown temperature
+    private volatile byte[]? _liveJson; // what this PC's /live answers with
+    private bool _livePolling;
+
+    /// <summary>Another PC's reading, fetched alongside (never instead of) this one's, so a slow or gone PC can't stall recording.</summary>
+    private async Task PollRemote(RemoteHistory source)
+    {
+        _livePolling = true;
+        try
+        {
+            var json = await Task.Run(source.Live);
+            if (source == _source && JsonSerializer.Deserialize<ResourceSnapshot>(json, LiveJson) is { } remote) ShowSnapshot(remote);
+        }
+        catch (Exception ex) when (ex is RemoteHistoryException or JsonException)
+        {
+            if (source == _source) CpuDetailText.Text = $"{source.Name}: {ex.Message}";
+        }
+        finally { _livePolling = false; }
+    }
+
+    /// <summary>A reading onto the Resources, Disks and Network tabs — this PC's, or the one being watched.</summary>
+    private void ShowSnapshot(ResourceSnapshot snap)
+    {
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
         CpuDetailText.Text = string.Join(" · ", new[]
         {
@@ -311,8 +342,20 @@ public partial class MainWindow : Window
             PushHistory(card.SpeedHistory, n.DownMbps + n.UpMbps);
             if (n.LatencyAvailable) PushHistory(card.LatencyHistory, n.LatencyMs);
         }
+    }
 
-        await OnResourceTick(snap);
+    /// <summary>Switching PCs: the live graphs and the per-disk / per-adapter cards start over for the new one.</summary>
+    private void ResetLiveGraphs()
+    {
+        foreach (var q in new[] { _cpuHistory, _memHistory, _gpuHistory }) q.Clear();
+        _liveGraphs.RemoveAll(g => g.Container != CpuGraphGrid && g.Container != MemGraphGrid && g.Container != GpuGraphGrid);
+        _cpuThreadHistory.Clear();
+        _cpuThreadTexts.Clear();
+        CpuThreadsGrid.Children.Clear();
+        _diskCards.Clear();
+        _netCards.Clear();
+        DiskCardsHost.Items.Clear();
+        NetCardsHost.Items.Clear();
     }
 
     // Always sampled, so ticking "Per thread" shows the full history straight away. No glow on these:
