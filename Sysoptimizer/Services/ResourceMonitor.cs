@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -104,6 +105,21 @@ public class ResourceMonitor : IDisposable
         return key?.GetValue("~MHz") is int mhz ? mhz : 0;
     }
 
+    private List<DriveSpace> _drives = new();
+    private DateTime _drivesReadAt;
+
+    private static List<DriveSpace> ReadDrives()
+    {
+        var drives = new List<DriveSpace>();
+        foreach (var d in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed))
+            try
+            {
+                if (d.IsReady) drives.Add(new DriveSpace { Name = d.Name.TrimEnd('\\'), FreeGB = d.AvailableFreeSpace / 1073741824.0, TotalGB = d.TotalSize / 1073741824.0 });
+            }
+            catch (IOException) { } // went away between listing and reading
+        return drives;
+    }
+
     public ResourceSnapshot Sample()
     {
         RefreshGpuCounters();
@@ -198,6 +214,8 @@ public class ResourceMonitor : IDisposable
         }
         _lastSample = now;
 
+        if ((now - _drivesReadAt).TotalSeconds >= 30) (_drives, _drivesReadAt) = (ReadDrives(), now);
+        snap.Drives = _drives;
         return snap;
     }
 

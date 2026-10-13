@@ -113,10 +113,13 @@ public partial class MainWindow
         (AlertMemCheck, AlertMemBox, "Memory", 90, 10, 100),
         (AlertAppCpuCheck, AlertAppCpuBox, "AppCpu", 50, 1, 100),
         (AlertAppCpuCheck, AlertAppMinutesBox, "AppMinutes", 5, 1, 240),
+        (AlertAppMemCheck, AlertAppMemBox, "AppMemGB", 16, 1, 512),
+        (AlertDiskCheck, AlertDiskBox, "DiskFree", 10, 1, 50),
+        (AlertBatteryCheck, AlertBatteryBox, "Battery", 15, 5, 90),
     };
 
-    private int _alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes;
-    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn;
+    private int _alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes, _alertAppMem, _alertDisk, _alertBattery;
+    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn;
     private bool _alertSettingsLoading;
 
     private void LoadAlertSettings()
@@ -164,6 +167,8 @@ public partial class MainWindow
         (_alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn) =
             (AlertCpuTempCheck.IsChecked == true, AlertGpuTempCheck.IsChecked == true, AlertMemCheck.IsChecked == true,
              AlertAppCpuCheck.IsChecked == true, AlertUnsignedCheck.IsChecked == true);
+        (_alertAppMem, _alertDisk, _alertBattery) = (values["AppMemGB"], values["DiskFree"], values["Battery"]);
+        (_alertAppMemOn, _alertDiskOn, _alertBatteryOn) = (AlertAppMemCheck.IsChecked == true, AlertDiskCheck.IsChecked == true, AlertBatteryCheck.IsChecked == true);
     }
 
     private int CurrentAlertValue(string name, int fallback)
@@ -171,7 +176,8 @@ public partial class MainWindow
         int v = name switch
         {
             "CpuTemp" => _alertCpuTemp, "GpuTemp" => _alertGpuTemp, "Memory" => _alertMem,
-            "AppCpu" => _alertAppCpu, _ => _alertAppMinutes,
+            "AppCpu" => _alertAppCpu, "AppMinutes" => _alertAppMinutes, "AppMemGB" => _alertAppMem,
+            "DiskFree" => _alertDisk, _ => _alertBattery,
         };
         return v > 0 ? v : fallback;
     }
@@ -186,25 +192,32 @@ public partial class MainWindow
     private readonly AlertState _localAlerts = new();
     private readonly Dictionary<string, AlertState> _remoteAlerts = new();
     private readonly Dictionary<string, DateTime> _appBusySince = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _appBigSince = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> _alertedAt = new();
 
     /// <summary>Checks the rules against this second's reading (and the app list, when it was sampled).</summary>
     private void CheckAlerts(ResourceSnapshot snap, List<ProcessUsage>? processes)
     {
-        var now = DateTime.UtcNow;
         CheckLimits(_localAlerts, snap, pc: null);
 
         if (processes == null) return;
-        if (!_alertAppCpuOn) { _appBusySince.Clear(); return; }
-        var busy = processes.Where(p => p.Cpu >= _alertAppCpu).ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
-        foreach (var name in _appBusySince.Keys.Where(n => !busy.ContainsKey(n)).ToList()) _appBusySince.Remove(name);
-        foreach (var (name, p) in busy)
-        {
-            if (!_appBusySince.TryGetValue(name, out var since)) { _appBusySince[name] = now; continue; }
-            if ((now - since).TotalMinutes >= _alertAppMinutes)
-                Alert($"app:{name}", $"{name} has used over {_alertAppCpu}% CPU for {_alertAppMinutes} min (now {p.Cpu:0}%)");
-        }
+        Sustained(_appBusySince, _alertAppCpuOn ? processes.Where(p => p.Cpu >= _alertAppCpu) : [], TimeSpan.FromMinutes(_alertAppMinutes),
+            p => ($"app:{p.Name}", $"{p.Name} has used over {_alertAppCpu}% CPU for {_alertAppMinutes} min (now {p.Cpu:0}%)"));
+        Sustained(_appBigSince, _alertAppMemOn ? processes.Where(p => p.RamMB >= _alertAppMem * 1024.0) : [], TimeSpan.FromSeconds(MemSustainSeconds),
+            p => ($"app-mem:{p.Name}", $"{p.Name} has used over {_alertAppMem} GB of memory for a minute (now {p.RamMB / 1024:0.0} GB)"));
 
+        // Alerts once an app has stayed over the limit for the whole span (an app that dips under starts over).
+        void Sustained(Dictionary<string, DateTime> since, IEnumerable<ProcessUsage> over, TimeSpan span, Func<ProcessUsage, (string Key, string Text)> alert)
+        {
+            var now = DateTime.UtcNow;
+            var current = over.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var name in since.Keys.Where(n => !current.ContainsKey(n)).ToList()) since.Remove(name);
+            foreach (var (name, p) in current)
+            {
+                if (!since.TryGetValue(name, out var start)) { since[name] = now; continue; }
+                if (now - start >= span) { var (key, text) = alert(p); Alert(key, text); }
+            }
+        }
     }
 
     /// <summary>The temperature and memory rules, for this PC (pc = null) or a watched one (its name leads the text).</summary>
@@ -218,6 +231,11 @@ public partial class MainWindow
             () => $"{who}GPU at {snap.GpuTempC:0}°C for over {SustainSeconds} s (limit {_alertGpuTemp}°C)");
         Sustained(ref state.MemHighSince, _alertMemOn && snap.MemPercent >= _alertMem, MemSustainSeconds, key + "memory",
             () => $"{who}Memory at {snap.MemPercent:0}% for over a minute (limit {_alertMem}%)");
+        if (_alertBatteryOn && snap.Battery is { PluggedIn: false } battery && battery.Percent <= _alertBattery)
+            Alert(key + "battery", $"{who}Battery at {battery.Percent:0}% and not plugged in (limit {_alertBattery}%)");
+        if (_alertDiskOn)
+            foreach (var drive in snap.Drives.Where(d => d.TotalGB > 0 && d.FreeGB / d.TotalGB * 100 <= _alertDisk))
+                Alert(key + "disk:" + drive.Name, $"{who}{drive.Name} is almost full — {drive.FreeGB:0.#} GB free of {drive.TotalGB:0} GB (limit {_alertDisk}% free)");
 
         void Sustained(ref DateTime? since, bool over, int seconds, string alertKey, Func<string> text)
         {
@@ -239,10 +257,13 @@ public partial class MainWindow
         return key?.GetValue(pc) is not 0; // on unless switched off
     }
 
-    /// <summary>Every 5 s: each watched PC with alerts on is asked for its reading and checked against the same limits.</summary>
-    private void PollRemoteAlerts()
+    /// <summary>
+    /// Every 5 s: each watched PC is asked for its reading — for its card on the Resources tab, and, with its
+    /// alerts on, checked against the same limits as this PC.
+    /// </summary>
+    private void PollRemotes()
     {
-        foreach (var pc in _remotes.Where(r => RemoteAlertsOn(r.Name)))
+        foreach (var pc in _remotes.ToList())
         {
             if (!_remoteAlertPolling.Add(pc.Name)) continue; // still waiting on the last answer
             var state = _remoteAlerts.TryGetValue(pc.Name, out var s) ? s : _remoteAlerts[pc.Name] = new AlertState();
@@ -250,22 +271,36 @@ public partial class MainWindow
             {
                 _remoteAlertPolling.Remove(pc.Name);
                 if (!_remotes.Contains(pc)) return; // removed meanwhile
+                var card = _pcCards.FirstOrDefault(c => c.Name == pc.Name);
+                bool alerts = RemoteAlertsOn(pc.Name);
                 if (t.IsCompletedSuccessfully && t.Result is { } snap)
                 {
-                    if (state.OfflineAlerted) Alert($"{pc.Name}:online", $"{pc.Name} is answering again");
+                    if (card != null) (card.Online, card.Status) = (true, CardStatus(snap));
+                    if (state.OfflineAlerted && alerts) Alert($"{pc.Name}:online", $"{pc.Name} is answering again");
                     (state.OfflineSince, state.OfflineAlerted) = (null, false);
-                    CheckLimits(state, snap, pc.Name);
+                    if (alerts) CheckLimits(state, snap, pc.Name);
                     return;
                 }
+                string reason = t.Exception?.InnerException?.Message ?? "no reading";
+                if (card != null) (card.Online, card.Status) = (false, $"Offline — {reason}");
                 state.OfflineSince ??= DateTime.UtcNow;
-                if (!state.OfflineAlerted && (DateTime.UtcNow - state.OfflineSince.Value).TotalSeconds >= OfflineAfterSeconds)
+                if (alerts && !state.OfflineAlerted && (DateTime.UtcNow - state.OfflineSince.Value).TotalSeconds >= OfflineAfterSeconds)
                 {
                     state.OfflineAlerted = true;
-                    Alert($"{pc.Name}:offline", $"{pc.Name} stopped answering — {t.Exception?.InnerException?.Message ?? "no reading"}");
+                    Alert($"{pc.Name}:offline", $"{pc.Name} stopped answering — {reason}");
                 }
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
     }
+
+    private static string CardStatus(ResourceSnapshot s) => string.Join(" · ", new[]
+    {
+        $"CPU {s.CpuPercent:0}%" + (double.IsNaN(s.CpuTempC) ? "" : $" {s.CpuTempC:0}°C"),
+        $"MEM {s.MemPercent:0}%",
+        s.GpuAvailable ? $"GPU {s.GpuPercent:0}%" + (double.IsNaN(s.GpuTempC) ? "" : $" {s.GpuTempC:0}°C") : null,
+        s.Battery is { } b ? $"battery {b.Percent:0}%{(b.PluggedIn ? "" : " (unplugged)")}" : null,
+        s.Drives.Count > 0 ? $"least free disk {s.Drives.Min(d => d.TotalGB > 0 ? d.FreeGB / d.TotalGB * 100 : 100):0}%" : null,
+    }.Where(x => x != null));
 
     private void RemoteAlerts_Click(object sender, RoutedEventArgs e)
     {

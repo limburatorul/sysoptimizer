@@ -190,6 +190,20 @@ public partial class MainWindow
 
     private void UpdateRangeList()
     {
+        bool energyMetric = _historyMetric is "power" or "battery";
+        HistoryMeasuredCheck.Visibility = energyMetric ? Visibility.Visible : Visibility.Collapsed;
+        if (energyMetric && HistoryMeasuredCheck.IsChecked == true)
+        {
+            // Asked once the range settles, not on every frame of a drag.
+            if (_measuredTimer == null)
+            {
+                _measuredTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                _measuredTimer.Tick += (_, _) => { _measuredTimer.Stop(); _ = ShowMeasured(); };
+            }
+            _measuredTimer.Stop();
+            _measuredTimer.Start();
+            return;
+        }
         HistoryRangeTitle.Text = $"TOP APPS IN THIS RANGE (AVERAGE {MetricLabel().ToUpperInvariant()})";
         if (ListMetric == "watts")
         {
@@ -211,6 +225,42 @@ public partial class MainWindow
             Description = $"CPU peak {t.PeakCpu:0}% · {FormatMB(t.PeakRamMB)} peak" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
             Note = _historyMetric switch { "mem" => FormatMB(t.AvgRamMB), "gpu" => $"{t.AvgGpu:0.0}% GPU", _ => $"{t.AvgCpu:0.0}% CPU" },
         }).ToList();
+    }
+
+    private System.Windows.Threading.DispatcherTimer? _measuredTimer;
+    private int _measuredRequest;
+
+    private void HistoryMeasured_Click(object sender, RoutedEventArgs e) => UpdateRangeList();
+
+    /// <summary>The range's apps by the energy Windows itself measured (SRUM) — this PC's, or the watched one's.</summary>
+    private async Task ShowMeasured()
+    {
+        int request = ++_measuredRequest;
+        var source = _source;
+        DateTime from = _historyFrom.ToUniversalTime(), to = _historyTo.ToUniversalTime();
+        HistoryRangeTitle.Text = "TOP APPS IN THIS RANGE (MEASURED BY WINDOWS) · LOADING…";
+        string text;
+        try { text = await Task.Run(() => source == null ? EnergyLines(from, to) : source.Energy(from, to)); }
+        catch (RemoteHistoryException ex) { text = "!" + ex.Message; }
+        if (request != _measuredRequest || source != _source) return; // the range or the PC changed meanwhile
+
+        HistoryRangeTitle.Text = "TOP APPS IN THIS RANGE (MEASURED BY WINDOWS)";
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var rows = lines.Where(l => !l.StartsWith('!')).Select(l => l.Split('\t'))
+            .Where(f => f.Length == 2 && double.TryParse(f[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
+            .Select(f => new OptionItem
+            {
+                Name = f[0],
+                Description = "CPU, GPU, screen, disk and network, as Windows measured them",
+                Note = $"{double.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture):0.##} Wh",
+            }).ToList();
+        if (rows.Count == 0)
+            rows.Add(new OptionItem
+            {
+                Name = lines.FirstOrDefault(l => l.StartsWith('!')) is { } error ? $"Couldn't read Windows' figures — {error[1..]}" : "Nothing measured in this range",
+                Description = "Windows writes its figures about once an hour and keeps about a week of them.",
+            });
+        HistoryRangeList.ItemsSource = rows;
     }
 
     /// <summary>

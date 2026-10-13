@@ -25,6 +25,13 @@ public class FanReading
     public double Rpm { get; set; }
 }
 
+public class DriveSpace
+{
+    public string Name { get; set; } = "";
+    public double FreeGB { get; set; }
+    public double TotalGB { get; set; }
+}
+
 /// <summary>A laptop's battery; absent on a desktop.</summary>
 public class BatteryReading
 {
@@ -56,4 +63,5 @@ public class ResourceSnapshot
     public double GpuMemUsedGB { get; set; }
     public List<DiskSnapshot> Disks { get; set; } = new();
     public List<NetSnapshot> Nets { get; set; } = new();
+    public List<DriveSpace> Drives { get; set; } = new(); // fixed drives' free space, read every 30 s
 }

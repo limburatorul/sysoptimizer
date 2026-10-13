@@ -272,7 +272,11 @@ public partial class MainWindow : Window
 
         if (_server != null) _liveJson = JsonSerializer.SerializeToUtf8Bytes(snap, LiveJson);
         if (_source == null) ShowSnapshot(snap);
-        else if (!_livePolling) _ = PollRemote(_source);
+        else
+        {
+            if (!_livePolling) _ = PollRemote(_source);
+            if (!_procsPolling && ProcessesList.IsVisible) _ = PollRemoteProcesses(_source);
+        }
         await OnResourceTick(snap); // this PC's own reading is always the one recorded and checked for alerts
     }
 
@@ -294,6 +298,26 @@ public partial class MainWindow : Window
             if (source == _source) CpuDetailText.Text = $"{source.Name}: {ex.Message}";
         }
         finally { _livePolling = false; }
+    }
+
+    private bool _procsPolling;
+
+    /// <summary>The watched PC's app list, for the Processes tab (it samples every 10 s, or every 2 s while its own list is open).</summary>
+    private async Task PollRemoteProcesses(RemoteHistory source)
+    {
+        _procsPolling = true;
+        try
+        {
+            var json = await Task.Run(source.Processes);
+            if (source != _source || JsonSerializer.Deserialize<List<ProcessUsage>>(json, LiveJson) is not { } list) return;
+            _remoteProcesses = list;
+            UpdateProcessRows();
+        }
+        catch (Exception ex) when (ex is RemoteHistoryException or JsonException)
+        {
+            if (source == _source) ProcessCountText.Text = $"{source.Name}: {ex.Message}";
+        }
+        finally { _procsPolling = false; }
     }
 
     /// <summary>A reading onto the Resources, Disks and Network tabs — this PC's, or the one being watched.</summary>
@@ -762,7 +786,7 @@ public partial class MainWindow : Window
         foreach (var item in _appItems.Where(i => i.IsChecked).ToList())
         {
             string id = (string)item.Tag!;
-            if (target != null) { await InstallOn(target, item.Name, t => t.Install(id)); continue; }
+            if (target != null) { await RunOn(target, $"Installing {item.Name}", t => t.Run("install-winget", id)); continue; }
             Log($"{item.Name}: installing...");
             var (ok, output) = await Task.Run(() =>
             {
@@ -771,6 +795,35 @@ public partial class MainWindow : Window
             });
             Log($"{item.Name}: {(ok ? "installed." : "failed — " + FirstLine(output))}");
         }
+    }
+
+    private void InstallSearch_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) SearchApps_Click(sender, e);
+    }
+
+    /// <summary>The whole winget catalog: the matches replace the popular list until the search is cleared.</summary>
+    private async void SearchApps_Click(object sender, RoutedEventArgs e)
+    {
+        string query = InstallSearchBox.Text.Trim();
+        _appItems.Clear();
+        if (query.Length == 0)
+        {
+            foreach (var a in WingetService.PopularApps) _appItems.Add(new OptionItem { Name = a.Name, Tag = a.Id });
+            InstallSearchStatus.Text = "Popular apps";
+            return;
+        }
+        InstallSearchButton.IsEnabled = false;
+        InstallSearchStatus.Text = $"Searching for “{query}”…";
+        try
+        {
+            var found = await Task.Run(() => WingetService.Search(query));
+            foreach (var r in found.Where(r => RemoteCommand.IsWingetId(r.Id)))
+                _appItems.Add(new OptionItem { Name = r.Name, Description = $"{r.Id} · {r.Version}", Tag = r.Id });
+            InstallSearchStatus.Text = found.Count == 0 ? $"Nothing found for “{query}”." : $"{found.Count} found for “{query}” — clear the search for the popular list.";
+        }
+        catch (System.ComponentModel.Win32Exception) { InstallSearchStatus.Text = "winget isn't installed — get “App Installer” from the Microsoft Store."; }
+        finally { InstallSearchButton.IsEnabled = true; }
     }
 
     private async void UpgradeAll_Click(object sender, RoutedEventArgs e)

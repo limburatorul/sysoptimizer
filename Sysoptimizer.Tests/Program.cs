@@ -75,15 +75,24 @@ try
     Check(minutes.Events.Count == 1 && minutes.Events[0].Kind == "sleep", "minutes: events copied through");
     Check(File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.min.csv")), "minutes: summary file written for a finished day");
 
-    // 4. Maintenance: finished days are gzipped (and still readable), days past retention deleted.
+    // 4. Maintenance: finished days are packed (and still readable), gzipped ones from before 1.8 repacked,
+    //    days past retention deleted.
     var old = DateTime.Today.AddDays(-40);
     File.WriteAllLines(Path.Combine(folder, $"{old:yyyy-MM-dd}.csv"), new[] { $"S,{Unix(old.AddHours(1))},1,1,1,1,1" });
+    var gzDay = DateTime.Today.AddDays(-3);
+    using (var gzOut = new StreamWriter(new GZipStream(File.Create(Path.Combine(folder, $"{gzDay:yyyy-MM-dd}.csv.gz")), CompressionLevel.Fastest)))
+        gzOut.WriteLine($"S,{Unix(gzDay.AddHours(2))},33,1,1,1,1");
     HistoryStore.Maintain(DateTime.Today);
-    Check(File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv.gz")) && !File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv")), "maintain: yesterday gzipped");
-    Check(!File.Exists(Path.Combine(folder, $"{old:yyyy-MM-dd}.csv")), "maintain: a day past retention deleted");
-    Check(HistoryStore.ReadDay(yesterday, minutes: false).System.Count == 5, "maintain: the gzipped day reads the same");
-    using (var gz = new StreamReader(new GZipStream(File.OpenRead(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv.gz")), CompressionMode.Decompress)))
-        Check(gz.ReadToEnd().Contains("burner"), "maintain: gzip holds the original lines");
+    string Day(DateTime d, string ext) => Path.Combine(folder, $"{d:yyyy-MM-dd}{ext}");
+    Check(File.Exists(Day(yesterday, ".csv.br")) && !File.Exists(Day(yesterday, ".csv")), "maintain: yesterday packed");
+    Check(File.Exists(Day(yesterday, ".min.csv.br")) && !File.Exists(Day(yesterday, ".min.csv")), "maintain: its minute summary packed too");
+    Check(File.Exists(Day(gzDay, ".csv.br")) && !File.Exists(Day(gzDay, ".csv.gz")), "maintain: a gzipped day repacked");
+    Check(HistoryStore.ReadDay(gzDay, minutes: false).System.SingleOrDefault().Cpu == 33, "maintain: the repacked day reads the same");
+    Check(!File.Exists(Day(old, ".csv")), "maintain: a day past retention deleted");
+    Check(HistoryStore.ReadDay(yesterday, minutes: false).System.Count == 5, "maintain: the packed day reads the same");
+    Check(HistoryStore.ReadDay(yesterday, minutes: true).System.SingleOrDefault().Cpu == 100, "maintain: the packed summary reads the same");
+    using (var br = new StreamReader(new BrotliStream(File.OpenRead(Day(yesterday, ".csv.br")), CompressionMode.Decompress)))
+        Check(br.ReadToEnd().Contains("burner"), "maintain: the pack holds the original lines");
 
     // 5. Per-app totals: an app missing from a snapshot counts as 0 there.
     var t0 = DateTime.UtcNow;
@@ -114,15 +123,21 @@ try
     Check(Throws(() => RemoteCrypto.Open(key, "other req", sealedBytes)), "remote: an answer to another request is rejected");
     Check(Throws(() => RemoteCrypto.Open(otherKey, "req", sealedBytes)), "remote: the wrong key can't open an answer");
 
-    int port;
-    { var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); probe.Start(); port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; probe.Stop(); }
-    var installs = new List<RemoteInstall>();
-    string FakeInstall(RemoteInstall job) { lock (installs) installs.Add(job); return "ok\ndone"; }
-    using (new HistoryServer(port, key, () => "{\"CpuPercent\":42}"u8.ToArray(), FakeInstall, "localhost"))
+    static int FreePort() { var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); probe.Start(); int p = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; probe.Stop(); return p; }
+    int port = FreePort(), passwordPort = FreePort();
+    var commands = new List<RemoteCommand>();
+    string FakeRun(RemoteCommand c) { lock (commands) commands.Add(c); return "ok\ndone"; }
+    var salt = RemoteCrypto.NewSalt();
+    DateTime energyFrom = default, energyTo = default;
+    using (new HistoryServer(port, key, salt, () => "{\"CpuPercent\":42}"u8.ToArray(), () => "[{\"Name\":\"app\"}]"u8.ToArray(),
+        (from, to) => { (energyFrom, energyTo) = (from, to); return "chrome\t1.5"; }, FakeRun, "localhost"))
     {
         var client = new RemoteHistory("test", "localhost", port, key);
         Check(client.Hello() == Environment.MachineName, "remote: the server says who it is");
         Check(client.Live().Contains("\"CpuPercent\":42"), "remote: the live reading arrives");
+        Check(client.Processes().Contains("\"app\""), "remote: the app list arrives");
+        var at = new DateTime(2026, 10, 12, 8, 0, 0, DateTimeKind.Utc);
+        Check(client.Energy(at, at.AddHours(1)) == "chrome\t1.5" && energyFrom == at && energyTo == at.AddHours(1), "remote: energy figures for the asked range");
         var first = client.ReadDay(DateTime.Today, minutes: false);
         Check(first.System.Count == 1 && first.Events.Count == 1, "remote: today's lines arrive");
         // More of today, including a launch stamped earlier than the newest line (written ~10 s late).
@@ -138,18 +153,33 @@ try
         try { intruder.Hello(); Check(false, "remote: the wrong key gets nothing"); }
         catch (RemoteHistoryException ex) { Check(ex.Message.Contains("refused"), "remote: the wrong key gets nothing"); }
 
-        // Installs: a winget id, an uploaded installer with its options, and what must be refused.
-        Check(client.Install("Notepad++.Notepad++").StartsWith("ok") && installs[^1].WingetId == "Notepad++.Notepad++", "install: a winget package reaches the installer");
+        // A password: the salt is handed out, and the key it makes is the one the server holds.
+        Check(RemoteHistory.SaltOf("localhost", port) is { } handed && handed.SequenceEqual(salt), "password: the salt is handed out without the key");
+        var fromPassword = RemoteCrypto.FromPassword("correct horse battery", salt);
+        Check(fromPassword.SequenceEqual(RemoteCrypto.FromPassword("correct horse battery", salt)) && !fromPassword.SequenceEqual(RemoteCrypto.FromPassword("correct horse battery", RemoteCrypto.NewSalt())),
+            "password: same password + salt = same key; another PC's salt = another key");
+        using (new HistoryServer(passwordPort, fromPassword, salt, host: "localhost"))
+            Check(new RemoteHistory("p", "localhost", passwordPort, RemoteCrypto.FromPassword("correct horse battery", RemoteHistory.SaltOf("localhost", passwordPort)!)).Hello() == Environment.MachineName,
+                "password: a watcher that knows only the password gets in");
+
+        // Commands: each reaches the PC as asked; anything malformed or replayed is refused.
+        Check(client.Run("install-winget", "Notepad++.Notepad++").StartsWith("ok") && commands[^1] is { Action: "install-winget", Target: "Notepad++.Notepad++" }, "command: a winget package reaches the installer");
         var setup = System.Security.Cryptography.RandomNumberGenerator.GetBytes(100_000);
-        client.InstallFile("setup v2.exe", setup, @"/S /D=C:\Program Files\X");
-        Check(installs[^1] is { FileName: "setup v2.exe", Args: @"/S /D=C:\Program Files\X" } j && j.File!.SequenceEqual(setup), "install: an uploaded file arrives intact, with its options");
-        Check(RemoteInstall.SafeFileName(@"..\evil.exe") == null && RemoteInstall.SafeFileName("a.bat") == null && RemoteInstall.SafeFileName("x.MSI") == "x.MSI", "install: only bare .exe/.msi names");
-        Check(!RemoteInstall.IsWingetId("a b") && !RemoteInstall.IsWingetId("x;calc") && RemoteInstall.IsWingetId("7zip.7zip"), "install: winget ids are checked");
-        int before = installs.Count;
-        try { client.InstallFile(@"..\evil.exe", setup, ""); } catch (RemoteHistoryException) { }
-        Check(installs.Count == before, "install: a path in the file name is refused");
+        client.Run("install-file", "setup v2.exe", @"/S /D=C:\Program Files\X", setup);
+        Check(commands[^1] is { Action: "install-file", Target: "setup v2.exe", Args: @"/S /D=C:\Program Files\X" } j && j.File!.SequenceEqual(setup), "command: an uploaded file arrives intact, with its options");
+        client.Run("install-url", "https://example.com/setup.msi", "/quiet");
+        Check(commands[^1] is { Action: "install-url", Target: "https://example.com/setup.msi", Args: "/quiet" }, "command: a link arrives with its options");
+        foreach (var simple in new[] { "upgrade-all", "cleanup", "restart", "shutdown" }) client.Run(simple);
+        client.Run("kill", "notepad");
+        Check(commands.Skip(commands.Count - 5).Select(c => c.Action).SequenceEqual(new[] { "upgrade-all", "cleanup", "restart", "shutdown", "kill" }) && commands[^1].Target == "notepad",
+            "command: update, clean up, restart, shut down, end an app");
+        int before = commands.Count;
+        foreach (var (what, target) in new[] { ("install-file", @"..\evil.exe"), ("install-url", "http://example.com/a.exe"), ("install-winget", "x;calc"), ("kill", @"..\x"), ("format-disk", null), ("restart", "now") })
+            try { client.Run(what, target, "", what == "install-file" ? setup : null); } catch (RemoteHistoryException) { }
+        Check(commands.Count == before, "command: paths, plain http, bad ids, unknown actions refused");
+        Check(RemoteCommand.SafeFileName("a.bat") == null && RemoteCommand.SafeFileName("x.MSI") == "x.MSI", "command: only bare .exe/.msi names");
         // The same signed request sent twice runs once.
-        string ip = HistoryServer.Prefix + "install?winget=7zip.7zip";
+        string ip = HistoryServer.Prefix + "do?what=cleanup";
         long it = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         using var poster = new System.Net.Http.HttpClient();
         System.Net.HttpStatusCode Post()
@@ -158,8 +188,28 @@ try
             m.Headers.Add("X-Time", it.ToString()); m.Headers.Add("X-Auth", RemoteCrypto.Sign(key, ip, it));
             return poster.Send(m).StatusCode;
         }
-        Check(Post() == System.Net.HttpStatusCode.OK && Post() == System.Net.HttpStatusCode.BadRequest && installs.Count == before + 1, "install: a replayed request doesn't run again");
+        var (once, again) = (Post(), Post());
+        Check(once == System.Net.HttpStatusCode.OK && again == System.Net.HttpStatusCode.BadRequest && commands.Count == before + 1, $"command: a replayed request doesn't run again ({once}, {again}, {commands.Count - before})");
+
+        // Discovery: the probe on the sharing port is answered with the PC's name.
+        var found = RemoteDiscovery.Find(port, TimeSpan.FromSeconds(1), System.Net.IPAddress.Loopback).GetAwaiter().GetResult();
+        Check(found.Count == 1 && found[0].Name == Environment.MachineName && found[0].Address == "127.0.0.1", "discovery: a sharing PC answers with its name");
     }
+
+    // 7. Windows' energy table and winget's search table, as the real tools print them.
+    var energy = EnergyService.Parse(new StringReader(
+        "AppId, UserId, TimeStamp, OnBattery, TotalEnergyConsumption\n" +
+        @"\Device\HarddiskVolume3\Program Files\Google\Chrome\chrome.exe, S-1, 2026-10-12T08:00:00.0000, FALSE, 3600000" + "\n" +
+        "Claude_2.19675.1.0_x64__pzs8sxrjxfjjc, S-1, 2026-10-12T08:01:00.0000, FALSE, 7200\n" +
+        "EMI_RAPL_Package0_PKG, , 2026-10-12T08:00:00.0000, FALSE, 99999999\n" +
+        @"\Device\HarddiskVolume3\a, b\x.exe, S-1, 2026-10-12T08:00:00.0000, FALSE, 5" + "\n"));
+    Check(energy.Count == 2 && energy[0] is (var t1, "chrome", 3600000) && t1 == new DateTime(2026, 10, 12, 8, 0, 0, DateTimeKind.Utc) && t1.Kind == DateTimeKind.Utc
+          && energy[1].Item2 == "Claude", "energy: apps named like the Processes tab, times in UTC, meters and broken rows skipped");
+    var table = WingetService.ParseTable(" \r  - \rName                       Id                         Version    Match        Source\r\n" +
+                                         "------------------------------------------------------------------------------\r\n" +
+                                         "VLC media player           VideoLAN.VLC               3.0.24     Moniker: vlc winget\r\n" +
+                                         "VLC media player (Nightly) VideoLAN.VLC.Nightly       4.0.0.0               winget\r\n");
+    Check(table.Count == 2 && table[0] == ("VLC media player", "VideoLAN.VLC", "3.0.24") && table[1].Id == "VideoLAN.VLC.Nightly", "winget: the search table parsed by column position");
 }
 catch (Exception ex)
 {

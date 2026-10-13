@@ -1,7 +1,11 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -11,8 +15,9 @@ using Sysoptimizer.Services;
 namespace Sysoptimizer;
 
 /// <summary>
-/// Remote monitoring (see RemoteHistory.cs): this PC can share its history with a key, and the History and
-/// Events tabs can show another PC's instead of this one's.
+/// Remote monitoring (see RemoteHistory.cs): this PC can share its history with a key or a password, and
+/// every tab can show another PC instead of this one — and act on it (install, update, end an app, clean up,
+/// restart, shut down).
 /// </summary>
 public partial class MainWindow
 {
@@ -25,6 +30,7 @@ public partial class MainWindow
     private RemoteHistory? _source; // null = this PC
     private string? _sourceError;
     private readonly List<RemoteHistory> _remotes = new();
+    private readonly System.Collections.ObjectModel.ObservableCollection<PcCard> _pcCards = new();
 
     private void InitRemote()
     {
@@ -47,13 +53,14 @@ public partial class MainWindow
                 if (key!.GetValue(name) is string data && data.Split('|') is [var address, var portText, var keyText]
                     && int.TryParse(portText, out int port) && RemoteCrypto.ParseKey(keyText) is { } secret)
                     _remotes.Add(new RemoteHistory(name, address, port, secret));
+        WatchedPcsList.ItemsSource = _pcCards;
         // The PC picked last time stays picked: watching another PC is usually what this one is set up for.
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
             RefreshRemoteLists(key?.GetValue("Showing") as string);
         Closed += (_, _) => _server?.Dispose();
-        var alertTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        alertTimer.Tick += (_, _) => PollRemoteAlerts();
-        alertTimer.Start();
+        var pollTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        pollTimer.Tick += (_, _) => PollRemotes();
+        pollTimer.Start();
     }
 
     // --- sharing this PC ---
@@ -76,7 +83,9 @@ public partial class MainWindow
         if (RemoteCrypto.ParseKey(RemoteKeyBox.Text) == null) RemoteKeyBox.Text = RemoteCrypto.NewKey();
         try
         {
-            _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, () => _liveJson, RunRemoteInstall);
+            _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, Salt(), () => _liveJson,
+                () => JsonSerializer.SerializeToUtf8Bytes(_lastProcesses.Select(p => p with { Path = null }), LiveJson), // a path means nothing on the watching PC
+                EnergyLines, RunRemoteCommand);
         }
         catch (HttpListenerException ex)
         {
@@ -86,11 +95,12 @@ public partial class MainWindow
         }
         Netsh($"advfirewall firewall delete rule name=\"{FirewallRule}\"");
         Netsh($"advfirewall firewall add rule name=\"{FirewallRule}\" dir=in action=allow protocol=TCP localport={port} profile=private");
+        Netsh($"advfirewall firewall add rule name=\"{FirewallRule}\" dir=in action=allow protocol=UDP localport={port} profile=private"); // "who's sharing?"
         SaveServerSettings(on: true, port);
 
         var addresses = Dns.GetHostAddresses(Dns.GetHostName())
             .Where(a => a.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a)).Select(a => a.ToString());
-        RemoteServerStatus.Text = $"Sharing. On the other PC, add {Environment.MachineName} (or {string.Join(", ", addresses)}), port {port}, and this key. "
+        RemoteServerStatus.Text = $"Sharing. On the other PC, add {Environment.MachineName} (or {string.Join(", ", addresses)}), port {port}, and this key or your password. "
             + "If Windows calls this network Public, the firewall keeps it closed — set the network to Private.";
         Log($"Sharing this PC's history on port {port}.");
     }
@@ -114,12 +124,38 @@ public partial class MainWindow
         if (RemoteKeyBox.Text.Length > 0) key.SetValue("Key", RemoteKeyBox.Text);
     }
 
-    private void RemoteNewKey_Click(object sender, RoutedEventArgs e)
+    /// <summary>This PC's password salt, made once: the same password gives a different key here than anywhere else.</summary>
+    private static byte[] Salt()
     {
-        RemoteKeyBox.Text = RemoteCrypto.NewKey();
+        using var key = Registry.CurrentUser.CreateSubKey(RemoteKey);
+        if (key.GetValue("Salt") is string text && RemoteCrypto.ParseSalt(text) is { } salt) return salt;
+        salt = RemoteCrypto.NewSalt();
+        key.SetValue("Salt", RemoteCrypto.Base64Url(salt));
+        return salt;
+    }
+
+    private void RemoteNewKey_Click(object sender, RoutedEventArgs e) => UseKey(RemoteCrypto.NewKey(), "New access key made");
+
+    private async void RemoteUsePassword_Click(object sender, RoutedEventArgs e)
+    {
+        string password = RemotePasswordBox.Password;
+        if (password.Length < RemoteCrypto.MinPasswordLength)
+        {
+            RemoteServerStatus.Text = $"The password needs at least {RemoteCrypto.MinPasswordLength} characters — it guards installs and restarts too.";
+            return;
+        }
+        RemotePasswordBox.Clear();
+        var salt = Salt();
+        var key = await Task.Run(() => RemoteCrypto.FromPassword(password, salt)); // ~half a second, on purpose
+        UseKey(RemoteCrypto.Base64Url(key), "Password set — on the other PC, type it where the key goes");
+    }
+
+    private void UseKey(string key, string what)
+    {
+        RemoteKeyBox.Text = key;
         if (_server != null) StartServer(); // the old key stops working now
         else SaveServerSettings(on: false, int.TryParse(RemotePortBox.Text, out int port) ? port : DefaultPort);
-        Log("New access key made — PCs using the old one can no longer read this PC's history.");
+        Log($"{what}. PCs using the old key or password can no longer reach this one.");
     }
 
     private void RemoteCopyKey_Click(object sender, RoutedEventArgs e)
@@ -135,32 +171,58 @@ public partial class MainWindow
         p?.WaitForExit(10000);
     }
 
-    // --- installs a watching PC sends here ---
+    // --- what a watching PC asks of this one ---
 
-    /// <summary>Runs on the server's thread: announced here first (tray, log, Events), then installed and reported back.</summary>
-    private string RunRemoteInstall(RemoteInstall job)
+    /// <summary>Windows' energy figures per app, for /energy: "app\tWh" lines, or one "!reason" line.</summary>
+    private static string EnergyLines(DateTime fromUtc, DateTime toUtc)
     {
-        string what = job.WingetId ?? job.FileName!;
-        Dispatcher.Invoke(() => Alert($"remote-install:{Guid.NewGuid()}", $"A watching PC is installing {what} here"));
+        try { return string.Join("\n", EnergyService.Top(fromUtc, toUtc).Select(t => $"{t.App}\t{t.Wh.ToString("0.###", CultureInfo.InvariantCulture)}")); }
+        catch (IOException ex) { return "!" + ex.Message; }
+    }
+
+    /// <summary>Runs on the server's thread: announced here first (tray, log, Events), then done and reported back.</summary>
+    private string RunRemoteCommand(RemoteCommand command)
+    {
+        string what = command.Action switch
+        {
+            "install-winget" or "install-file" => $"installing {command.Target}",
+            "install-url" => $"installing from {command.Target}",
+            "upgrade-all" => "updating every app",
+            "kill" => $"ending {command.Target}",
+            "cleanup" => "cleaning up temporary files",
+            "restart" => "restarting this PC in 1 minute",
+            _ => "shutting this PC down in 1 minute",
+        };
+        Dispatcher.Invoke(() => Alert($"remote:{Guid.NewGuid()}", $"A watching PC is {what} here"));
         string output;
-        bool ok = job.WingetId != null ? WingetService.Install(job.WingetId, out output) : RunInstaller(job, out output);
-        Dispatcher.Invoke(() => Log($"Remote install of {what}: {(ok ? "done." : "failed — " + LastLine(output))}"));
+        bool ok = command.Action switch
+        {
+            "install-winget" => WingetService.Install(command.Target!, out output),
+            "install-file" => RunInstaller(command.Target!, folder => File.WriteAllBytes(Path.Combine(folder, command.Target!), command.File!), command.Args, out output),
+            "install-url" => InstallFromLink(command.Target!, command.Args, out output),
+            "upgrade-all" => WingetService.UpgradeAll(out output),
+            "kill" => EndApp(command.Target!, out output),
+            "cleanup" => CleanAll(out output),
+            _ => ShutDown(restart: command.Action == "restart", out output),
+        };
+        Dispatcher.Invoke(() => Log($"Remote request ({what}): {(ok ? "done" : "failed")} — {LastLine(output)}"));
         return $"{(ok ? "ok" : "failed")}\n{output}";
     }
 
-    private static bool RunInstaller(RemoteInstall job, out string output)
+    /// <summary>Puts the installer in a fresh folder (via <paramref name="fetch"/>), runs it with its options, removes it.</summary>
+    private static bool RunInstaller(string fileName, Action<string> fetch, string args, out string output)
     {
         // The elevated user's own temp folder: other accounts on this PC can't swap the file before it runs.
         string folder = Path.Combine(Path.GetTempPath(), "Sysoptimizer-install-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(folder);
-            string file = Path.Combine(folder, job.FileName!);
-            File.WriteAllBytes(file, job.File!);
+            fetch(folder);
+            string file = Path.Combine(folder, fileName);
             // No hidden window: an installer without quiet options shows up for whoever sits at this PC.
             var psi = file.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)
-                ? new ProcessStartInfo("msiexec.exe", $"/i \"{file}\" /qn /norestart {job.Args}")
-                : new ProcessStartInfo(file, job.Args);
+                ? new ProcessStartInfo("msiexec.exe", $"/i \"{file}\" /qn /norestart {args}")
+                : new ProcessStartInfo(file, args);
             psi.UseShellExecute = false;
             using var process = Process.Start(psi)!;
             if (!process.WaitForExit(TimeSpan.FromMinutes(30)))
@@ -176,7 +238,7 @@ public partial class MainWindow
             };
             return process.ExitCode is 0 or 3010 or 1641;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or HttpRequestException or TaskCanceledException)
         {
             output = ex.Message;
             return false;
@@ -188,14 +250,73 @@ public partial class MainWindow
         }
     }
 
+    private static readonly HttpClient Downloads = new() { Timeout = TimeSpan.FromMinutes(30) };
+
+    /// <summary>Downloads an installer over HTTPS (redirects followed, still HTTPS only) and runs it.</summary>
+    private static bool InstallFromLink(string url, string args, out string output)
+    {
+        HttpResponseMessage response;
+        try { response = Downloads.Send(new HttpRequestMessage(HttpMethod.Get, url), HttpCompletionOption.ResponseHeadersRead); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { output = $"couldn't download it — {ex.Message}"; return false; }
+        using (response)
+        {
+            var final = response.RequestMessage?.RequestUri;
+            string? name = RemoteCommand.SafeFileName(response.Content.Headers.ContentDisposition?.FileNameStar?.Trim('"')
+                                                      ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                                                      ?? Path.GetFileName(final?.LocalPath ?? ""));
+            if (!response.IsSuccessStatusCode) { output = $"the link answered {(int)response.StatusCode} {response.ReasonPhrase}"; return false; }
+            if (final?.Scheme != Uri.UriSchemeHttps) { output = "the link redirected away from HTTPS — not downloaded"; return false; }
+            if (name == null) { output = "the link doesn't lead to an .exe or .msi file"; return false; }
+            return RunInstaller(name, folder =>
+            {
+                using var target = File.Create(Path.Combine(folder, name));
+                response.Content.ReadAsStream().CopyTo(target);
+            }, args, out output);
+        }
+    }
+
+    private static bool EndApp(string name, out string output)
+    {
+        if (CriticalProcesses.Contains(name)) { output = $"{name} wasn't ended — Windows needs it running"; return false; }
+        int ended = 0, failed = 0;
+        foreach (var p in Process.GetProcessesByName(name))
+            using (p)
+            {
+                try { p.Kill(); ended++; }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { failed++; } // protected, or already gone
+            }
+        output = ended + failed == 0 ? $"{name} isn't running" : $"{ended} ended" + (failed > 0 ? $", {failed} refused (protected)" : "");
+        return ended > 0;
+    }
+
+    private static bool CleanAll(out string output)
+    {
+        long freed = 0;
+        foreach (var target in CleanupService.Targets) freed += CleanupService.Clean(target.Path()).freed;
+        output = $"{CleanupService.FormatSize(freed)} freed";
+        return true;
+    }
+
+    /// <summary>A minute's notice, so whoever is at that PC can save (or cancel with shutdown /a).</summary>
+    private static bool ShutDown(bool restart, out string output)
+    {
+        var psi = new ProcessStartInfo("shutdown.exe") { CreateNoWindow = true, UseShellExecute = false };
+        foreach (var arg in new[] { restart ? "/r" : "/s", "/t", "60", "/c", $"Sysoptimizer: a watching PC asked to {(restart ? "restart" : "shut down")} this PC." })
+            psi.ArgumentList.Add(arg);
+        using var p = Process.Start(psi)!;
+        p.WaitForExit(10000);
+        output = p.ExitCode == 0 ? $"{(restart ? "restarting" : "shutting down")} in 1 minute" : $"Windows refused (code {p.ExitCode}) — a restart may already be pending";
+        return p.ExitCode == 0;
+    }
+
     private static string LastLine(string text) =>
         text.Split('\n', '\r').Select(l => l.Trim()).LastOrDefault(l => l.Length > 0) ?? "no details";
 
-    // --- installing on the PC being shown ---
+    // --- acting on another PC ---
 
-    private async Task InstallOn(RemoteHistory target, string what, Func<RemoteHistory, string> send)
+    private async Task RunOn(RemoteHistory target, string what, Func<RemoteHistory, string> send)
     {
-        Log($"{what}: installing on {target.Name}…");
+        Log($"{what} on {target.Name}…");
         try
         {
             string answer = await Task.Run(() => send(target));
@@ -212,36 +333,110 @@ public partial class MainWindow
         var dialog = new OpenFileDialog { Filter = "Installers (*.exe, *.msi)|*.exe;*.msi", Title = $"Install on {target.Name}" };
         if (dialog.ShowDialog(this) != true) return;
         string name = Path.GetFileName(dialog.FileName);
-        if (RemoteInstall.SafeFileName(name) == null) { Log($"{name}: only .exe and .msi files with names up to 128 characters can be sent."); return; }
-        if (new FileInfo(dialog.FileName).Length > RemoteInstall.MaxFileBytes) { Log($"{name} is over 512 MB — too big to send; install it from a shared folder instead."); return; }
+        if (RemoteCommand.SafeFileName(name) == null) { Log($"{name}: only .exe and .msi files with names up to 128 characters can be sent."); return; }
+        if (new FileInfo(dialog.FileName).Length > RemoteCommand.MaxFileBytes) { Log($"{name} is over 512 MB — too big to send; use Install from link instead."); return; }
         string args = InstallArgsBox.Text.Trim();
         byte[] bytes;
         try { bytes = await File.ReadAllBytesAsync(dialog.FileName); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log($"{name}: couldn't read it — {ex.Message}"); return; }
-        await InstallOn(target, name, t => t.InstallFile(name, bytes, args));
+        await RunOn(target, $"Installing {name}", t => t.Run("install-file", name, args, bytes));
+    }
+
+    private async void InstallRemoteLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (_source is not { } target) return;
+        string url = InstallLinkBox.Text.Trim();
+        if (!RemoteCommand.IsHttpsLink(url)) { Log("Paste an https:// link to an .exe or .msi installer."); return; }
+        string args = InstallArgsBox.Text.Trim();
+        await RunOn(target, $"Installing from {url}", t => t.Run("install-url", url, args));
+    }
+
+    /// <summary>The actions on a watched PC's card (Resources tab): update apps, clean up, restart, shut down.</summary>
+    private void PcActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: PcCard card } button || _remotes.FirstOrDefault(r => r.Name == card.Name) is not { } target) return;
+        var menu = new ContextMenu { PlacementTarget = button, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        void Add(string header, string action, string? confirm = null)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += async (_, _) =>
+            {
+                if (confirm != null && MessageBox.Show(this, confirm, "Sysoptimizer", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+                await RunOn(target, header.TrimEnd('…'), t => t.Run(action));
+            };
+            menu.Items.Add(item);
+        }
+        Add("Update all apps", "upgrade-all");
+        Add("Clean up temporary files", "cleanup");
+        menu.Items.Add(new Separator());
+        Add("Restart…", "restart", $"Restart {target.Name}? Whoever is using it gets a minute's notice to save their work.");
+        Add("Shut down…", "shutdown", $"Shut {target.Name} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
+        menu.IsOpen = true;
+    }
+
+    private void PcShow_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: PcCard card })
+            HistorySourceCombo.SelectedItem = HistorySourceCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (i.Tag as RemoteHistory)?.Name == card.Name);
     }
 
     // --- watching another PC ---
+
+    private async void RemoteFind_Click(object sender, RoutedEventArgs e)
+    {
+        int port = int.TryParse(RemoteAddPortBox.Text.Trim(), out int p) && p is > 0 and <= 65535 ? p : DefaultPort;
+        RemoteFindButton.IsEnabled = false;
+        RemoteAddStatus.Text = $"Looking for PCs sharing on port {port}…";
+        try
+        {
+            var found = await RemoteDiscovery.Find(port, TimeSpan.FromSeconds(2));
+            RemoteFoundList.ItemsSource = found.Select(f => new OptionItem { Name = f.Name, Description = f.Address, Tag = port }).ToList();
+            RemoteAddStatus.Text = found.Count == 0
+                ? "None answered. Sharing must be on there (About → Share this PC), and the network set to Private on both PCs."
+                : "Pick one, then type its key or password.";
+        }
+        catch (SocketException ex) { RemoteAddStatus.Text = $"Couldn't search the network — {ex.Message}"; }
+        finally { RemoteFindButton.IsEnabled = true; }
+    }
+
+    private void RemoteFound_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: OptionItem found }) return;
+        RemoteAddressBox.Text = found.Description;
+        RemoteAddPortBox.Text = found.Tag?.ToString();
+        RemoteAddKeyBox.Focus();
+    }
 
     private async void RemoteAdd_Click(object sender, RoutedEventArgs e)
     {
         string address = RemoteAddressBox.Text.Trim();
         if (Uri.CheckHostName(address) == UriHostNameType.Unknown) { RemoteAddStatus.Text = "Type the PC's name or IP address."; return; }
         if (!int.TryParse(RemoteAddPortBox.Text.Trim(), out int port) || port < 1 || port > 65535) { RemoteAddStatus.Text = "The port must be a number from 1 to 65535."; return; }
-        if (RemoteCrypto.ParseKey(RemoteAddKeyBox.Text) is not { } secret) { RemoteAddStatus.Text = "That isn't an access key — copy it from the About tab on the other PC."; return; }
+        string secretText = RemoteAddKeyBox.Text.Trim();
+        var secret = RemoteCrypto.ParseKey(secretText);
+        if (secret == null && secretText.Length < RemoteCrypto.MinPasswordLength)
+        {
+            RemoteAddStatus.Text = $"That's neither an access key nor a password (at least {RemoteCrypto.MinPasswordLength} characters) — copy the key from the About tab on the other PC, or type its password.";
+            return;
+        }
 
         RemoteAddButton.IsEnabled = false;
         RemoteAddStatus.Text = $"Connecting to {address}…";
         try
         {
+            // A password becomes that PC's key with its own salt, which it hands out for exactly this.
+            secret ??= await Task.Run(() => RemoteHistory.SaltOf(address, port) is { } salt
+                ? RemoteCrypto.FromPassword(secretText, salt)
+                : throw new RemoteHistoryException("has no password set (or runs an older Sysoptimizer) — use its access key"));
             string name = await Task.Run(() => new RemoteHistory(address, address, port, secret).Hello());
             name = name.Replace('|', '_');
             _remotes.RemoveAll(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
             _remotes.Add(new RemoteHistory(name, address, port, secret));
             using (var key = Registry.CurrentUser.CreateSubKey(RemotePcsKey))
-                key.SetValue(name, $"{address}|{port}|{RemoteAddKeyBox.Text.Trim()}");
+                key.SetValue(name, $"{address}|{port}|{RemoteCrypto.Base64Url(secret)}");
             RemoteAddKeyBox.Clear();
-            RemoteAddStatus.Text = $"Added {name}. Pick it under Showing, in the bar at the bottom.";
+            RemoteFoundList.ItemsSource = null;
+            RemoteAddStatus.Text = $"Added {name}. Pick it under Showing, in the bar at the bottom, or on its card in Resources.";
             RefreshRemoteLists();
         }
         catch (RemoteHistoryException ex) { RemoteAddStatus.Text = $"{address}: {ex.Message}."; }
@@ -260,11 +455,14 @@ public partial class MainWindow
     private void RefreshRemoteLists(string? select = null)
     {
         RemotePcList.ItemsSource = _remotes.Select(r => new OptionItem { Name = r.Name, Description = $"{r.Address}, port {r.Port}", IsChecked = RemoteAlertsOn(r.Name) }).ToList();
+        foreach (var gone in _pcCards.Where(c => !_remotes.Any(r => r.Name == c.Name)).ToList()) _pcCards.Remove(gone);
+        foreach (var r in _remotes.Where(r => !_pcCards.Any(c => c.Name == r.Name))) _pcCards.Add(new PcCard { Name = r.Name });
+        WatchedPcsPanel.Visibility = _pcCards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         string? selected = select ?? _source?.Name;
         HistorySourceCombo.Items.Clear();
         HistorySourceCombo.Items.Add(new ComboBoxItem { Content = "This PC" });
         foreach (var r in _remotes) HistorySourceCombo.Items.Add(new ComboBoxItem { Content = r.Name, Tag = r });
-        HistorySourceCombo.SelectedItem = HistorySourceCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (i.Tag as RemoteHistory)?.Name == selected)
+        HistorySourceCombo.SelectedItem = HistorySourceCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => string.Equals((i.Tag as RemoteHistory)?.Name, selected, StringComparison.OrdinalIgnoreCase))
                                           ?? HistorySourceCombo.Items[0];
     }
 
@@ -284,16 +482,38 @@ public partial class MainWindow
         _navLoadedAt = DateTime.MinValue;
         RetentionCombo.IsEnabled = source == null; // retention is this PC's own setting
         Title = source == null ? "Sysoptimizer" : $"Sysoptimizer — watching {source.Name}";
-        // What acts on this PC (health, cleanup, freeing memory) has no place while another one is shown.
-        HealthCardBorder.Visibility = FreeMemoryButton.Visibility = UpgradeAllButton.Visibility = source == null ? Visibility.Visible : Visibility.Collapsed;
-        // Installing follows the PC being shown.
+        // What acts on this PC alone (health, freeing memory, blocking apps) has no place while another one is shown.
+        HealthCardBorder.Visibility = FreeMemoryButton.Visibility = UpgradeAllButton.Visibility = BlockAppsButton.Visibility
+            = source == null ? Visibility.Visible : Visibility.Collapsed;
+        if (source != null) UnblockButton.Visibility = BlockedPanel.Visibility = Visibility.Collapsed;
+        else RefreshBlocked();
+        // Installing and the app list follow the PC being shown.
         RemoteInstallPanel.Visibility = source == null ? Visibility.Collapsed : Visibility.Visible;
         InstallSelectedButton.Content = source == null ? "Install selected" : $"Install selected on {source.Name}";
+        foreach (var card in _pcCards) card.Shown = card.Name == source?.Name;
+        _remoteProcesses = new();
+        _processRows.Clear();
+        _processRowMap.Clear();
         ResetLiveGraphs();
         if (_historyApp != null) HistoryAppClear_Click(this, new RoutedEventArgs());
         if (!IsLoaded) return;
         _animateChart = true;
         _ = LoadHistory();
         if (EventsList.IsVisible) _ = LoadEvents();
+        if (ProcessesList.IsVisible && source == null) UpdateProcessRows();
     }
+}
+
+/// <summary>A watched PC's card on the Resources tab, refreshed every 5 seconds.</summary>
+public sealed class PcCard : INotifyPropertyChanged
+{
+    public required string Name { get; init; }
+    private string _status = "Connecting…";
+    private bool _online, _shown;
+    public string Status { get => _status; set { _status = value; Raise(nameof(Status)); } }
+    public bool Online { get => _online; set { _online = value; Raise(nameof(Online)); } }
+    public bool Shown { get => _shown; set { _shown = value; Raise(nameof(Shown)); } }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

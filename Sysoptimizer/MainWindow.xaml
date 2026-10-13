@@ -57,6 +57,43 @@
                 <TabItem Header="Resources">
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                         <StackPanel Margin="16">
+                            <StackPanel x:Name="WatchedPcsPanel" Visibility="Collapsed" Margin="0,0,0,16">
+                                <TextBlock Style="{StaticResource CaseLabel}" Tag="Watched PCs" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                <ItemsControl x:Name="WatchedPcsList">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border x:Name="Card" Width="300" Padding="14,10" Margin="0,0,10,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                                <DockPanel>
+                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                                                        <Button x:Name="ShowButton" Content="Show" Tag="{Binding}" Click="PcShow_Click" Margin="6,0,0,0" AutomationProperties.Name="{Binding Name, StringFormat=Show {0} in every tab}" />
+                                                        <Button Content="⋯" Tag="{Binding}" Click="PcActions_Click" Margin="6,0,0,0" ToolTip="Update apps, clean up, restart or shut down" AutomationProperties.Name="{Binding Name, StringFormat=Actions on {0}}" />
+                                                    </StackPanel>
+                                                    <StackPanel>
+                                                        <TextBlock>
+                                                            <Run x:Name="Dot" Text="● " Foreground="{DynamicResource StatusBad}" /><Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Status}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Online}" Value="True">
+                                                    <Setter TargetName="Dot" Property="Foreground" Value="{DynamicResource StatusGood}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Shown}" Value="True">
+                                                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                                                    <Setter TargetName="ShowButton" Property="IsEnabled" Value="False" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                             <Border x:Name="HealthCardBorder" Padding="20" Margin="0,0,0,16" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" x:Name="OptimizeNowButton" Content="Optimize now" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" Click="OptimizeNow_Click" />
@@ -176,7 +213,7 @@
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal">
                                             <Button x:Name="UnblockButton" Content="Unblock selected" Click="UnblockApps_Click" Margin="0,0,8,0" Visibility="Collapsed" />
-                                            <Button Content="Block from starting" Click="BlockApps_Click" Margin="0,0,8,0" />
+                                            <Button x:Name="BlockAppsButton" Content="Block from starting" Click="BlockApps_Click" Margin="0,0,8,0" />
                                             <Button Content="End task" Style="{StaticResource PrimaryButton}" Click="EndTask_Click" />
                                         </StackPanel>
                                     </StackPanel>
@@ -253,6 +290,21 @@
                                                     <TextBox x:Name="AlertAppMinutesBox" TextChanged="AlertSetting_Changed" AutomationProperties.Name="App CPU duration, minutes" />
                                                     <TextBlock Text="min" />
                                                 </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,24,4">
+                                                    <CheckBox x:Name="AlertAppMemCheck" VerticalAlignment="Center" Click="AlertSetting_Changed" Content="An app using over" />
+                                                    <TextBox x:Name="AlertAppMemBox" TextChanged="AlertSetting_Changed" AutomationProperties.Name="App memory limit, GB" />
+                                                    <TextBlock Text="GB for 1 min" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,24,4">
+                                                    <CheckBox x:Name="AlertDiskCheck" VerticalAlignment="Center" Click="AlertSetting_Changed" Content="A disk under" />
+                                                    <TextBox x:Name="AlertDiskBox" TextChanged="AlertSetting_Changed" AutomationProperties.Name="Disk free space limit, percent" />
+                                                    <TextBlock Text="% free" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,24,4">
+                                                    <CheckBox x:Name="AlertBatteryCheck" VerticalAlignment="Center" Click="AlertSetting_Changed" Content="Battery under" />
+                                                    <TextBox x:Name="AlertBatteryBox" TextChanged="AlertSetting_Changed" AutomationProperties.Name="Battery limit, percent" />
+                                                    <TextBlock Text="% unplugged" />
+                                                </StackPanel>
                                                 <CheckBox x:Name="AlertUnsignedCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="An unsigned app starts" />
                                             </WrapPanel>
                                         </StackPanel>
@@ -327,11 +379,11 @@
                                     </ComboBox>
                                     <Button DockPanel.Dock="Right" Content="Export…" Margin="8,0,0,0" VerticalAlignment="Center" Click="ExportHistory_Click" ToolTip="Save what the chart shows as CSV files (Excel opens them)" />
                                     <ComboBox x:Name="RetentionCombo" DockPanel.Dock="Right" Width="190" VerticalAlignment="Center" SelectionChanged="Retention_Changed" AutomationProperties.Name="Keep history for"
-                                              ToolTip="How long the history is kept. About 1 MB per day; days past the limit are removed at midnight.">
-                                        <ComboBoxItem Content="Keep 1 month (~30 MB)" Tag="30" />
-                                        <ComboBoxItem Content="Keep 3 months (~90 MB)" Tag="90" />
-                                        <ComboBoxItem Content="Keep 6 months (~180 MB)" Tag="180" />
-                                        <ComboBoxItem Content="Keep 1 year (~370 MB)" Tag="365" />
+                                              ToolTip="How long the history is kept. About 1.5 MB per day, packed; days past the limit are removed at midnight.">
+                                        <ComboBoxItem Content="Keep 1 month (~45 MB)" Tag="30" />
+                                        <ComboBoxItem Content="Keep 3 months (~140 MB)" Tag="90" />
+                                        <ComboBoxItem Content="Keep 6 months (~280 MB)" Tag="180" />
+                                        <ComboBoxItem Content="Keep 1 year (~560 MB)" Tag="365" />
                                     </ComboBox>
                                     <Border x:Name="HistoryNavigatorBorder" Margin="8,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                                         <Canvas x:Name="HistoryNavigator" Background="Transparent" Cursor="Hand" ToolTip="Drag to move through the history"
@@ -371,7 +423,11 @@
                                     </ScrollViewer>
                                 </DockPanel>
                                 <DockPanel Grid.Column="2">
-                                    <TextBlock x:Name="HistoryRangeTitle" DockPanel.Dock="Top" Text="TOP APPS IN THIS RANGE" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                        <CheckBox x:Name="HistoryMeasuredCheck" DockPanel.Dock="Right" Content="Measured by Windows" FontSize="11" Visibility="Collapsed" Click="HistoryMeasured_Click"
+                                                  ToolTip="Rank the apps by the energy Windows itself recorded (screen, disk and network included) instead of the estimate from CPU and GPU use. Windows writes it about once an hour and keeps about a week." />
+                                        <TextBlock x:Name="HistoryRangeTitle" Text="TOP APPS IN THIS RANGE" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    </DockPanel>
                                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                         <ItemsControl x:Name="HistoryRangeList" ItemTemplate="{StaticResource HistoryAppRowTemplate}" />
                                     </ScrollViewer>
@@ -620,17 +676,26 @@
                             </Border>
                             <Border x:Name="InstallPage" Visibility="Collapsed">
                                 <DockPanel Margin="16">
+                                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                        <TextBox x:Name="InstallSearchBox" DockPanel.Dock="Left" Width="260" VerticalContentAlignment="Center" MaxLength="100" AutomationProperties.Name="Search the winget catalog"
+                                                 ToolTip="Search every app winget can install; empty = the popular list" KeyDown="InstallSearch_KeyDown" />
+                                        <Button x:Name="InstallSearchButton" DockPanel.Dock="Left" Content="Search" Margin="8,0,0,0" Click="SearchApps_Click" />
+                                        <TextBlock x:Name="InstallSearchStatus" Text="Popular apps" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
                                         <Button x:Name="UpgradeAllButton" Content="Update all (winget)" Click="UpgradeAll_Click" Margin="0,0,8,0" />
                                         <Button x:Name="InstallSelectedButton" Content="Install selected" Style="{StaticResource PrimaryButton}" Click="InstallApps_Click" />
-                                        <StackPanel x:Name="RemoteInstallPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="16,0,0,0">
-                                            <Button Content="Install a file…" Click="InstallRemoteFile_Click"
-                                                    ToolTip="Send an .exe or .msi (up to 512 MB) to the PC being shown and run it there" />
-                                            <TextBlock Text="with options" VerticalAlignment="Center" Margin="10,0,6,0" Foreground="{DynamicResource TextSecondary}" />
-                                            <TextBox x:Name="InstallArgsBox" Width="160" MaxLength="1024" VerticalContentAlignment="Center" AutomationProperties.Name="Installer options"
-                                                     ToolTip="Passed to an .exe installer, such as /S, /silent or /quiet. Without them, the installer waits for someone to click through it on that PC. An .msi always installs quietly." />
-                                        </StackPanel>
                                     </StackPanel>
+                                    <WrapPanel x:Name="RemoteInstallPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" Margin="0,12,0,0">
+                                        <Button Content="Install a file…" Click="InstallRemoteFile_Click" Margin="0,0,8,6"
+                                                ToolTip="Send an .exe or .msi (up to 512 MB) to the PC being shown and run it there" />
+                                        <TextBox x:Name="InstallLinkBox" Width="300" MaxLength="2048" VerticalContentAlignment="Center" Margin="0,0,8,6" AutomationProperties.Name="Link to an installer"
+                                                 ToolTip="An https:// link to an .exe or .msi: the PC being shown downloads it itself, with no size limit" />
+                                        <Button Content="Install from link" Click="InstallRemoteLink_Click" Margin="0,0,16,6" />
+                                        <TextBlock Text="Options" VerticalAlignment="Center" Margin="0,0,6,6" Foreground="{DynamicResource TextSecondary}" />
+                                        <TextBox x:Name="InstallArgsBox" Width="160" MaxLength="1024" VerticalContentAlignment="Center" Margin="0,0,0,6" AutomationProperties.Name="Installer options"
+                                                 ToolTip="Passed to an .exe installer (a file or a link), such as /S, /silent or /quiet. Without them, the installer waits for someone to click through it on that PC. An .msi always installs quietly." />
+                                    </WrapPanel>
                                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                         <ItemsControl x:Name="AppsList">
                                             <ItemsControl.ItemsPanel>
@@ -642,7 +707,7 @@
                                                 <DataTemplate>
                                                     <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="{DynamicResource ControlRadius}"
                                                             Padding="10" Margin="0,0,10,10" Width="220">
-                                                        <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Name}" />
+                                                        <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Name}" ToolTip="{Binding Description}" />
                                                     </Border>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
@@ -784,7 +849,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Share this PC's history" FontWeight="SemiBold" />
                                     <TextBlock Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"
-                                               Text="Lets another PC running Sysoptimizer watch this one's history, without remote desktop and its overhead. Encrypted, and only for whoever has the access key — which also lets that PC install apps here, so share it only with PCs you trust. The firewall is opened for private networks only." />
+                                               Text="Lets another PC running Sysoptimizer watch this one's history, without remote desktop and its overhead. Encrypted, and only for whoever has the access key or password — which also lets that PC act here (install and update apps, end an app, clean up, restart or shut down), so share it only with PCs you trust. The firewall is opened for private networks only." />
                                     <StackPanel Orientation="Horizontal">
                                         <CheckBox x:Name="RemoteServerCheck" Content="Allow, on port" VerticalAlignment="Center" Click="RemoteServer_Click" />
                                         <TextBox x:Name="RemotePortBox" Width="76" Margin="8,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Port" />
@@ -794,6 +859,12 @@
                                         <Button DockPanel.Dock="Right" Content="Copy" Click="RemoteCopyKey_Click" Margin="6,0,0,0" />
                                         <TextBox x:Name="RemoteKeyBox" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas" VerticalAlignment="Center" AutomationProperties.Name="Access key" />
                                     </DockPanel>
+                                    <DockPanel Margin="0,6,0,0">
+                                        <Button DockPanel.Dock="Right" Content="Use password" Click="RemoteUsePassword_Click" Margin="6,0,0,0"
+                                                ToolTip="The key becomes this password's: PCs then connect with the password instead. At least 12 characters — it allows installs and restarts here." />
+                                        <TextBlock DockPanel.Dock="Left" Text="or a password" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource TextSecondary}" />
+                                        <PasswordBox x:Name="RemotePasswordBox" VerticalAlignment="Center" AutomationProperties.Name="Password instead of the key" />
+                                    </DockPanel>
                                     <TextBlock x:Name="RemoteServerStatus" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
                                 </StackPanel>
                             </Border>
@@ -801,7 +872,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Watch another PC" FontWeight="SemiBold" />
                                     <TextBlock Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"
-                                               Text="Its name or IP address, port and access key, as shown in the About tab on that PC. Then pick it under Showing, in the bar at the bottom." />
+                                               Text="Its name or IP address, port, and access key or password, as set in the About tab on that PC — or find the PCs sharing on this network. Then pick it under Showing, in the bar at the bottom." />
                                     <WrapPanel>
                                         <StackPanel Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource CaseLabel}" Tag="Address" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
@@ -812,11 +883,27 @@
                                             <TextBox x:Name="RemoteAddPortBox" Width="76" Text="7777" AutomationProperties.Name="Port of the PC to watch" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,8,6">
-                                            <TextBlock Style="{StaticResource CaseLabel}" Tag="Access key" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
-                                            <TextBox x:Name="RemoteAddKeyBox" Width="260" FontFamily="Cascadia Mono, Consolas" AutomationProperties.Name="Access key of the PC to watch" />
+                                            <TextBlock Style="{StaticResource CaseLabel}" Tag="Access key or password" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                            <TextBox x:Name="RemoteAddKeyBox" Width="260" FontFamily="Cascadia Mono, Consolas" AutomationProperties.Name="Access key or password of the PC to watch" />
                                         </StackPanel>
-                                        <Button x:Name="RemoteAddButton" Content="Add" Style="{StaticResource PrimaryButton}" VerticalAlignment="Bottom" Margin="0,0,0,6" Click="RemoteAdd_Click" />
+                                        <Button x:Name="RemoteAddButton" Content="Add" Style="{StaticResource PrimaryButton}" VerticalAlignment="Bottom" Margin="0,0,8,6" Click="RemoteAdd_Click" />
+                                        <Button x:Name="RemoteFindButton" Content="Find on this network" VerticalAlignment="Bottom" Margin="0,0,0,6" Click="RemoteFind_Click"
+                                                ToolTip="Ask the network which PCs share with Sysoptimizer on this port" />
                                     </WrapPanel>
+                                    <ItemsControl x:Name="RemoteFoundList">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Margin="0,0,8,6" Click="RemoteFound_Click" AutomationProperties.Name="{Binding Name, StringFormat=Use {0}}">
+                                                    <TextBlock><Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding Description, Mode=OneWay}" /></TextBlock>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                     <TextBlock x:Name="RemoteAddStatus" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
                                     <ItemsControl x:Name="RemotePcList" Margin="0,6,0,0">
                                         <ItemsControl.ItemTemplate>
@@ -824,7 +911,7 @@
                                                 <DockPanel Margin="0,4">
                                                     <Button DockPanel.Dock="Right" Content="Remove" Tag="{Binding Name}" Click="RemoteRemove_Click" AutomationProperties.Name="{Binding Name, StringFormat=Remove {0}}" />
                                                     <CheckBox DockPanel.Dock="Right" Content="Alerts" Tag="{Binding Name}" IsChecked="{Binding IsChecked, Mode=OneTime}" Click="RemoteAlerts_Click" VerticalAlignment="Center" Margin="0,0,14,0"
-                                                              ToolTip="Notify here when this PC runs hot, fills its memory, or stops answering — the limits set in Processes → Events"
+                                                              ToolTip="Notify here when this PC runs hot, fills its memory or a disk, runs low on battery, or stops answering — the limits set in Processes → Events"
                                                               AutomationProperties.Name="{Binding Name, StringFormat=Alerts for {0}}" />
                                                     <StackPanel VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />

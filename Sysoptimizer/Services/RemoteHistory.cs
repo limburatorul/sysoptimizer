@@ -3,6 +3,8 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -16,8 +18,10 @@ namespace Sysoptimizer.Services;
 ///     answered, and a captured request stops working after two minutes;
 ///   • every answer is sealed with AES-GCM under a key derived from the access key, bound to the request
 ///     it answers — the LAN sees neither what ran nor when, and can't alter or replay it;
-///   • besides the history, the key lets the watcher install apps here (winget, or an .exe/.msi it uploads —
-///     sealed the same way, and each install request runs once); the firewall rule is for private networks only.
+///   • besides reading, the key lets the watcher act here — install apps (winget, a link, or an .exe/.msi it
+///     uploads, sealed the same way), update them, end an app, clean up, restart or shut down; each such
+///     request runs once. The key can be random, or derived from a password (PBKDF2, with this PC's salt);
+///   • the firewall rules are for private networks only; a UDP probe on the same port finds sharing PCs.
 /// Free of WPF so the self-test can exercise it.
 /// </summary>
 public static class RemoteCrypto
@@ -26,21 +30,35 @@ public static class RemoteCrypto
     private const int NonceBytes = 12, TagBytes = 16;
     public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(2);
 
+    public const int MinPasswordLength = 12, SaltBytes = 16;
+
     public static string NewKey() => Base64Url(RandomNumberGenerator.GetBytes(KeyBytes));
+    public static string KeyText(byte[] key) => Base64Url(key);
 
     /// <summary>The key as typed or pasted, or null if it isn't one.</summary>
-    public static byte[]? ParseKey(string text)
+    public static byte[]? ParseKey(string text) => Decode(text) is { Length: KeyBytes } bytes ? bytes : null;
+    public static byte[]? ParseSalt(string text) => Decode(text) is { Length: SaltBytes } bytes ? bytes : null;
+
+    private static byte[]? Decode(string text)
     {
         try
         {
             string s = text.Trim().Replace('-', '+').Replace('_', '/');
-            var bytes = Convert.FromBase64String(s.PadRight(s.Length + (4 - s.Length % 4) % 4, '='));
-            return bytes.Length == KeyBytes ? bytes : null;
+            return Convert.FromBase64String(s.PadRight(s.Length + (4 - s.Length % 4) % 4, '='));
         }
         catch (FormatException) { return null; }
     }
 
-    private static string Base64Url(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    public static byte[] NewSalt() => RandomNumberGenerator.GetBytes(SaltBytes);
+
+    /// <summary>
+    /// A password's key: PBKDF2-SHA256, 600,000 rounds, salted per sharing PC — so each guess at a captured
+    /// request costs a fraction of a second, and one password gives different keys on different PCs.
+    /// </summary>
+    public static byte[] FromPassword(string password, byte[] salt) =>
+        Rfc2898DeriveBytes.Pbkdf2(password, salt, 600_000, HashAlgorithmName.SHA256, KeyBytes);
+
+    public static string Base64Url(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static byte[] Derive(byte[] key, string purpose) => HKDF.DeriveKey(HashAlgorithmName.SHA256, key, 32, info: Encoding.UTF8.GetBytes(purpose));
 
     public static string Sign(byte[] key, string pathAndQuery, long unixTime) =>
@@ -82,10 +100,11 @@ public static class RemoteCrypto
     }
 }
 
-/// <summary>What a watcher asks to install: a winget package, or an uploaded installer run with its options.</summary>
-public sealed record RemoteInstall(string? WingetId, string? FileName, byte[]? File, string Args)
+/// <summary>What a watcher asks this PC to do; built only through <see cref="From"/>, which checks every part.</summary>
+public sealed record RemoteCommand(string Action, string? Target, byte[]? File, string Args)
 {
     public const long MaxFileBytes = 512L << 20;
+    public const int MaxArgs = 1024;
     private static readonly Regex WingetIdPattern = new(@"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$");
 
     public static bool IsWingetId(string? id) => id != null && WingetIdPattern.IsMatch(id);
@@ -94,28 +113,80 @@ public sealed record RemoteInstall(string? WingetId, string? FileName, byte[]? F
     public static string? SafeFileName(string? name) =>
         name is { Length: > 4 and <= 128 } && name == Path.GetFileName(name) && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
         && (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) ? name : null;
+
+    public static bool IsHttpsLink(string? url) =>
+        url is { Length: <= 2048 } && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+    public static bool IsProcessName(string? name) =>
+        name is { Length: > 0 and <= 128 } && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+
+    /// <summary>The command a request asks for, or null when it isn't one this PC accepts.</summary>
+    public static RemoteCommand? From(string? action, string? target, string? args, byte[]? file)
+    {
+        args ??= "";
+        if (args.Length > MaxArgs) return null;
+        return action switch
+        {
+            "install-winget" when IsWingetId(target) && file == null => new(action, target, null, ""),
+            "install-file" when SafeFileName(target) != null && file != null => new(action, target, file, args),
+            "install-url" when IsHttpsLink(target) && file == null => new(action, target, null, args),
+            "kill" when IsProcessName(target) && file == null => new(action, target, null, ""),
+            "upgrade-all" or "cleanup" or "restart" or "shutdown" when target == null && file == null => new(action, null, null, ""),
+            _ => null,
+        };
+    }
 }
 
-/// <summary>The watched PC's side: answers signed requests for its history, and installs what a watcher sends.</summary>
+/// <summary>
+/// The watched PC's side: answers signed requests for its history and readings, runs what a watcher asks,
+/// and answers "who's sharing?" probes on the same port (UDP) with its name.
+/// </summary>
 public sealed class HistoryServer : IDisposable
 {
     public const string Prefix = "/sysoptimizer/v1/";
     private readonly HttpListener _listener = new();
+    private readonly UdpClient? _discovery;
+    private volatile bool _disposed;
     private readonly byte[] _key;
-    private readonly Func<byte[]?>? _live;
-    private readonly Func<RemoteInstall, string>? _install;
-    private readonly Dictionary<string, DateTime> _ran = new(); // install requests already run, by signature
-    private readonly object _installGate = new();               // one installer at a time
+    private readonly byte[]? _salt;
+    private readonly Func<byte[]?>? _live, _processes;
+    private readonly Func<DateTime, DateTime, string>? _energy;
+    private readonly Func<RemoteCommand, string>? _run;
+    private readonly Dictionary<string, DateTime> _ran = new(); // commands already run, by signature
+    private readonly object _runGate = new();                   // one at a time
 
+    /// <param name="salt">This PC's password salt, handed to anyone who asks (it isn't secret); null = none.</param>
     /// <param name="live">The latest full reading (the Resources tab's), serialized; null until the first one.</param>
-    /// <param name="install">Runs an install and returns its outcome ("ok"/"failed" line, then details).</param>
+    /// <param name="processes">The running apps (the Processes tab's list), serialized.</param>
+    /// <param name="energy">Windows' energy figures per app between two UTC times, one "app\tWh" line each.</param>
+    /// <param name="run">Runs a command and returns its outcome ("ok"/"failed" line, then details).</param>
     /// <param name="host">"+" = every address (needs admin — the app always runs elevated); the self-test uses localhost.</param>
-    public HistoryServer(int port, byte[] key, Func<byte[]?>? live = null, Func<RemoteInstall, string>? install = null, string host = "+")
+    public HistoryServer(int port, byte[] key, byte[]? salt = null, Func<byte[]?>? live = null, Func<byte[]?>? processes = null,
+        Func<DateTime, DateTime, string>? energy = null, Func<RemoteCommand, string>? run = null, string host = "+")
     {
-        (_key, _live, _install) = (key, live, install);
+        (_key, _salt, _live, _processes, _energy, _run) = (key, salt, live, processes, energy, run);
         _listener.Prefixes.Add($"http://{host}:{port}{Prefix}");
         _listener.Start();
         _ = Task.Run(Loop);
+        try
+        {
+            _discovery = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+            _ = Task.Run(Discover);
+        }
+        catch (SocketException) { } // the port is taken for UDP: this PC just isn't found, it can still be added by address
+    }
+
+    private async Task Discover()
+    {
+        while (!_disposed)
+        {
+            UdpReceiveResult probe;
+            try { probe = await _discovery!.ReceiveAsync(); }
+            catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { continue; } // a bounced reply, or stopped
+            if (Encoding.ASCII.GetString(probe.Buffer) != RemoteDiscovery.Probe) continue;
+            try { await _discovery.SendAsync(Encoding.UTF8.GetBytes(RemoteDiscovery.Answer + Environment.MachineName), probe.RemoteEndPoint); }
+            catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
+        }
     }
 
     private async Task Loop()
@@ -136,6 +207,12 @@ public sealed class HistoryServer : IDisposable
         try
         {
             string path = request.RawUrl ?? "";
+            string endpoint = request.Url!.AbsolutePath;
+            if (request.HttpMethod == "GET" && endpoint.EndsWith("/salt") && _salt != null)
+            {
+                response.OutputStream.Write(Encoding.ASCII.GetBytes(RemoteCrypto.Base64Url(_salt))); // public: it only makes a password's key
+                return;
+            }
             string? time = request.Headers["X-Time"];
             string? signature = request.Headers["X-Auth"];
             if (request.HttpMethod is not ("GET" or "POST") || !RemoteCrypto.Verify(_key, path, time, signature, DateTime.UtcNow))
@@ -143,8 +220,11 @@ public sealed class HistoryServer : IDisposable
                 response.StatusCode = 401; // no detail: the caller doesn't hold the key, or its clock is off
                 return;
             }
-            byte[]? body = request.HttpMethod == "POST" ? Install(request, path, time!, signature!)
-                : request.Url!.AbsolutePath.EndsWith("/live") ? _live?.Invoke() : Answer(request.Url.AbsolutePath, request.QueryString);
+            byte[]? body = request.HttpMethod == "POST" ? Command(request, path, time!, signature!)
+                : endpoint.EndsWith("/live") ? _live?.Invoke()
+                : endpoint.EndsWith("/procs") ? _processes?.Invoke()
+                : endpoint.EndsWith("/energy") ? Energy(request.QueryString)
+                : Answer(endpoint, request.QueryString);
             if (body == null) { response.StatusCode = 400; return; }
             var sealedBody = RemoteCrypto.Seal(_key, $"{path}\n{time}", body);
             response.ContentType = "application/octet-stream";
@@ -161,35 +241,34 @@ public sealed class HistoryServer : IDisposable
         }
     }
 
-    /// <summary>install?winget=id, or install?file=name&amp;args=… with the installer sealed in the body. Null = refused.</summary>
-    private byte[]? Install(HttpListenerRequest request, string path, string time, string signature)
+    private byte[]? Energy(System.Collections.Specialized.NameValueCollection query) =>
+        _energy != null && long.TryParse(query["from"], NumberStyles.None, CultureInfo.InvariantCulture, out long from)
+        && long.TryParse(query["to"], NumberStyles.None, CultureInfo.InvariantCulture, out long to) && from <= to
+            ? Encoding.UTF8.GetBytes(_energy(DateTimeOffset.FromUnixTimeSeconds(from).UtcDateTime, DateTimeOffset.FromUnixTimeSeconds(to).UtcDateTime))
+            : null;
+
+    /// <summary>do?what=…&amp;target=…&amp;args=…, an uploaded installer sealed in the body. Null = refused.</summary>
+    private byte[]? Command(HttpListenerRequest request, string path, string time, string signature)
     {
-        if (_install == null || !request.Url!.AbsolutePath.EndsWith("/install")) return null;
+        if (_run == null || !request.Url!.AbsolutePath.EndsWith("/do")) return null;
         lock (_ran)
         {
             foreach (var old in _ran.Where(r => DateTime.UtcNow - r.Value > 2 * RemoteCrypto.MaxClockSkew).Select(r => r.Key).ToList()) _ran.Remove(old);
             if (!_ran.TryAdd(signature.ToUpperInvariant(), DateTime.UtcNow)) return null; // the same request again: a replay
         }
-        var query = request.QueryString;
-        string args = query["args"] ?? "";
-        if (args.Length > 1024) return null;
-        RemoteInstall job;
-        if (query["winget"] is { } id)
+        byte[]? file = null;
+        long length = request.ContentLength64;
+        if (length > 0)
         {
-            if (!RemoteInstall.IsWingetId(id)) return null;
-            job = new RemoteInstall(id, null, null, "");
-        }
-        else if (RemoteInstall.SafeFileName(query["file"]) is { } name)
-        {
-            long length = request.ContentLength64;
-            if (length <= 0 || length > RemoteInstall.MaxFileBytes + 4096) return null;
+            if (length > RemoteCommand.MaxFileBytes + 4096) return null;
             var sealedFile = new byte[length];
             request.InputStream.ReadExactly(sealedFile);
-            try { job = new RemoteInstall(null, name, RemoteCrypto.Open(_key, $"upload\n{path}\n{time}", sealedFile), args); }
+            try { file = RemoteCrypto.Open(_key, $"upload\n{path}\n{time}", sealedFile); }
             catch (CryptographicException) { return null; }
         }
-        else return null;
-        lock (_installGate) return Encoding.UTF8.GetBytes(_install(job));
+        var query = request.QueryString;
+        if (RemoteCommand.From(query["what"], query["target"], query["args"], file) is not { } command) return null;
+        lock (_runGate) return Encoding.UTF8.GetBytes(_run(command));
     }
 
     /// <summary>info → name and oldest day; day → that day's lines (raw ones after a time, or the minute summary).</summary>
@@ -219,8 +298,53 @@ public sealed class HistoryServer : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
+        _discovery?.Dispose();
         try { _listener.Stop(); } catch (ObjectDisposedException) { }
         _listener.Close();
+    }
+}
+
+/// <summary>Finds PCs sharing on the network: a UDP broadcast on the sharing port, answered with each PC's name.</summary>
+public static class RemoteDiscovery
+{
+    public const string Probe = "SYSOPTIMIZER-WHO", Answer = "SYSOPTIMIZER-HERE\n";
+
+    /// <summary>(name, address) of each PC that answers within <paramref name="wait"/>; <paramref name="to"/> = one address instead of broadcasting.</summary>
+    public static async Task<List<(string Name, string Address)>> Find(int port, TimeSpan wait, IPAddress? to = null)
+    {
+        using var udp = new UdpClient(0) { EnableBroadcast = true };
+        var probe = Encoding.ASCII.GetBytes(Probe);
+        foreach (var target in to != null ? new[] { to } : BroadcastAddresses())
+            try { await udp.SendAsync(probe, new IPEndPoint(target, port)); }
+            catch (SocketException) { } // an adapter that can't send right now
+        var found = new List<(string Name, string Address)>();
+        using var timeout = new CancellationTokenSource(wait);
+        while (true)
+        {
+            UdpReceiveResult reply;
+            try { reply = await udp.ReceiveAsync(timeout.Token); }
+            catch (OperationCanceledException) { break; }
+            catch (SocketException) { continue; } // a bounced probe
+            string text = Encoding.UTF8.GetString(reply.Buffer);
+            string name = text.StartsWith(Answer) ? new string(text[Answer.Length..].Where(c => !char.IsControl(c) && c != '|').ToArray()) : "";
+            if (name.Length is > 0 and <= 64 && !found.Any(f => f.Address == reply.RemoteEndPoint.Address.ToString()))
+                found.Add((name, reply.RemoteEndPoint.Address.ToString()));
+        }
+        return found;
+    }
+
+    /// <summary>Every adapter's own broadcast address (Windows sends 255.255.255.255 out of one adapter only), plus that.</summary>
+    private static IEnumerable<IPAddress> BroadcastAddresses()
+    {
+        yield return IPAddress.Broadcast;
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up))
+            foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                if (unicast.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(unicast.Address))
+                {
+                    byte[] ip = unicast.Address.GetAddressBytes(), mask = unicast.IPv4Mask.GetAddressBytes();
+                    yield return new IPAddress(ip.Select((b, i) => (byte)(b | ~mask[i])).ToArray());
+                }
     }
 }
 
@@ -249,12 +373,29 @@ public sealed class RemoteHistory
     /// <summary>The PC's latest full reading (what its own Resources tab shows), as JSON.</summary>
     public string Live() => Get("live");
 
-    /// <summary>Installs a winget package there; returns its "ok"/"failed" line and details.</summary>
-    public string Install(string wingetId) => Send(HttpMethod.Post, $"install?winget={Uri.EscapeDataString(wingetId)}", null, SlowHttp);
+    /// <summary>
+    /// Asks the PC to do something (see <see cref="RemoteCommand"/>); returns its "ok"/"failed" line and details.
+    /// An installer to upload goes in <paramref name="file"/>.
+    /// </summary>
+    public string Run(string what, string? target = null, string args = "", byte[]? file = null) =>
+        Send(HttpMethod.Post, $"do?what={what}" + (target != null ? $"&target={Uri.EscapeDataString(target)}" : "")
+            + (args.Length > 0 ? $"&args={Uri.EscapeDataString(args)}" : "")
+            + $"&n={Guid.NewGuid():N}", file, SlowHttp); // so the same command twice in a second isn't taken for a replay
 
-    /// <summary>Uploads an installer and runs it there with these options (an .msi always runs quietly).</summary>
-    public string InstallFile(string fileName, byte[] file, string args) =>
-        Send(HttpMethod.Post, $"install?file={Uri.EscapeDataString(fileName)}&args={Uri.EscapeDataString(args)}", file, SlowHttp);
+    /// <summary>The PC's running apps, as its Processes tab lists them (JSON).</summary>
+    public string Processes() => Get("procs");
+
+    /// <summary>Windows' energy figures per app on that PC between two UTC times, one "app\tWh" line each.</summary>
+    public string Energy(DateTime fromUtc, DateTime toUtc) =>
+        Send(HttpMethod.Get, $"energy?from={new DateTimeOffset(fromUtc).ToUnixTimeSeconds()}&to={new DateTimeOffset(toUtc).ToUnixTimeSeconds()}", null, SlowHttp);
+
+    /// <summary>The PC's password salt (public; asked before the key exists), or null if it has none to give.</summary>
+    public static byte[]? SaltOf(string address, int port)
+    {
+        try { return RemoteCrypto.ParseSalt(Http.GetStringAsync($"http://{address}:{port}{HistoryServer.Prefix}salt").GetAwaiter().GetResult()); }
+        catch (HttpRequestException ex) { throw new RemoteHistoryException($"can't reach {address}:{port} — {ex.Message}"); }
+        catch (TaskCanceledException) { throw new RemoteHistoryException($"{address}:{port} didn't answer in time"); }
+    }
 
     /// <summary>Asks the PC who it is — the check made before a PC is added.</summary>
     public string Hello() => Get("info").Split('\n')[0];
@@ -332,8 +473,8 @@ public sealed class RemoteHistory
         {
             if (response.StatusCode == HttpStatusCode.Unauthorized)
                 throw new RemoteHistoryException("refused — the access key doesn't match, or the two PCs' clocks differ by over 2 minutes");
-            if (response.StatusCode == HttpStatusCode.BadRequest && method == HttpMethod.Post)
-                throw new RemoteHistoryException("refused the install — it runs a Sysoptimizer older than 1.7, or the request was malformed");
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+                throw new RemoteHistoryException("refused — it runs an older Sysoptimizer that can't do this (update it there), or the request was malformed");
             if (!response.IsSuccessStatusCode) throw new RemoteHistoryException($"answered {(int)response.StatusCode} {response.ReasonPhrase}");
             using var body = new MemoryStream();
             response.Content.ReadAsStream().CopyTo(body);

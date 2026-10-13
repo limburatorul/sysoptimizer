@@ -27,8 +27,9 @@ public sealed record HistoryData(List<SysSample> System, List<ProcSample> Proces
 ///   P,unixSeconds,name,cpu,ramMB,gpu              — the top processes, every 10 seconds
 ///   E,unixSeconds,kind,detail                     — app launches, sleep/wake, app start (with boot time)
 /// Today's file is appended and flushed line by line, so a hard reset loses at most a torn last line,
-/// which the reader skips. A finished day is gzipped and gets a per-minute summary beside it in the same
-/// format (S = the minute's peaks, P = the minute's top apps), so weeks and months load in a blink.
+/// which the reader skips. A finished day gets a per-minute summary beside it in the same format (S = the
+/// minute's peaks, P = the minute's top apps), so weeks and months load in a blink, and both are packed with
+/// Brotli at its smallest (~6x; days gzipped before 1.8 are repacked, and still read meanwhile).
 /// Shared verbatim with Sysoptimizer.Mcp — keep it free of WPF.
 /// </summary>
 public static class HistoryStore
@@ -75,7 +76,8 @@ public static class HistoryStore
         if (_writer != null && day == _writerDay) return _writer;
         _writer?.Dispose();
         Directory.CreateDirectory(Folder);
-        Maintain(day);
+        // Packing takes seconds per day: never on the recording path (Write runs on the UI thread).
+        Task.Run(() => Maintain(day));
         var stream = new FileStream(RawPath(day), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         _writer = new StreamWriter(stream) { AutoFlush = true };
         _writerDay = day;
@@ -89,27 +91,41 @@ public static class HistoryStore
     private static string RawPath(DateTime day) => Path.Combine(Folder, $"{day:yyyy-MM-dd}.csv");
     private static string MinutePath(DateTime day) => Path.Combine(Folder, $"{day:yyyy-MM-dd}.min.csv");
 
-    /// <summary>Gzips and summarizes every finished day still in plain text; deletes days past retention.</summary>
+    private static readonly object MaintainGate = new();
+
+    /// <summary>Summarizes and packs every finished day (and repacks gzipped ones); deletes days past retention.</summary>
     public static void Maintain(DateTime today)
     {
-        foreach (var file in Directory.GetFiles(Folder))
+        lock (MaintainGate) // a second run (the day changed again, or the self-test) waits, then finds little left
         {
-            string name = Path.GetFileName(file);
-            if (!DateTime.TryParseExact(name[..Math.Min(10, name.Length)], "yyyy-MM-dd", Inv, DateTimeStyles.None, out var day)) continue;
-            try
+            foreach (var file in Directory.GetFiles(Folder))
             {
-                if (day < today.AddDays(-RetentionDays)) { File.Delete(file); continue; }
-                if (day < today && name == $"{day:yyyy-MM-dd}.csv")
+                string name = Path.GetFileName(file);
+                if (!DateTime.TryParseExact(name[..Math.Min(10, name.Length)], "yyyy-MM-dd", Inv, DateTimeStyles.None, out var day)) continue;
+                try
                 {
-                    EnsureMinuteSummary(day);
-                    using (var source = File.OpenRead(file))
-                    using (var target = new GZipStream(File.Create(file + ".gz"), CompressionLevel.SmallestSize))
-                        source.CopyTo(target);
-                    File.Delete(file);
+                    if (day < today.AddDays(-RetentionDays)) { File.Delete(file); continue; }
+                    if (day >= today) continue;
+                    if (name == $"{day:yyyy-MM-dd}.csv") EnsureMinuteSummary(day);
+                    if (name.EndsWith(".csv")) Pack(file, File.OpenRead(file), file + ".br");
+                    else if (name.EndsWith(".csv.gz")) Pack(file, new GZipStream(File.OpenRead(file), CompressionMode.Decompress), file[..^3] + ".br");
                 }
+                catch (IOException) { } // a reader has it open right now; try again on the next day change
             }
-            catch (IOException) { } // a reader has it open right now; try again on the next day change
+            foreach (var file in Directory.GetFiles(Folder, "*.min.csv")) // summaries written since the loop listed the folder
+                try { Pack(file, File.OpenRead(file), file + ".br"); }
+                catch (IOException) { }
         }
+    }
+
+    /// <summary>Writes the packed copy under a temporary name first, so a reader never finds half a file.</summary>
+    private static void Pack(string file, Stream source, string target)
+    {
+        using (source)
+        using (var packed = new BrotliStream(File.Create(target + ".tmp"), CompressionLevel.SmallestSize))
+            source.CopyTo(packed);
+        File.Move(target + ".tmp", target, overwrite: true);
+        File.Delete(file);
     }
 
     // --- reading ---
@@ -173,7 +189,9 @@ public static class HistoryStore
         if (day < DateTime.Now.Date)
         {
             EnsureMinuteSummary(day);
-            return File.Exists(MinutePath(day)) ? new StreamReader(Shared(MinutePath(day))) : null;
+            string path = MinutePath(day);
+            return File.Exists(path + ".br") ? new StreamReader(new BrotliStream(Shared(path + ".br"), CompressionMode.Decompress))
+                 : File.Exists(path) ? new StreamReader(Shared(path)) : null;
         }
         using var raw = OpenRaw(day);
         return raw == null ? null : new StreamReader(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(string.Join('\n', Summarize(raw)))));
@@ -181,7 +199,7 @@ public static class HistoryStore
 
     private static void EnsureMinuteSummary(DateTime day)
     {
-        if (File.Exists(MinutePath(day))) return;
+        if (File.Exists(MinutePath(day)) || File.Exists(MinutePath(day) + ".br")) return;
         using var raw = OpenRaw(day);
         if (raw == null) return;
         var lines = Summarize(raw);
@@ -285,6 +303,7 @@ public static class HistoryStore
     private static StreamReader? OpenRaw(DateTime day)
     {
         string csv = RawPath(day);
+        if (File.Exists(csv + ".br")) return new StreamReader(new BrotliStream(Shared(csv + ".br"), CompressionMode.Decompress));
         if (File.Exists(csv + ".gz")) return new StreamReader(new GZipStream(Shared(csv + ".gz"), CompressionMode.Decompress));
         if (File.Exists(csv)) return new StreamReader(Shared(csv));
         return null;

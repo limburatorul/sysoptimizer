@@ -13,6 +13,8 @@
   <ItemGroup>
     <Compile Include="..\Sysoptimizer\Services\HistoryStore.cs" Link="HistoryStore.cs" />
     <Compile Include="..\Sysoptimizer\Services\RemoteHistory.cs" Link="RemoteHistory.cs" />
+    <Compile Include="..\Sysoptimizer\Services\EnergyService.cs" Link="EnergyService.cs" />
+    <Compile Include="..\Sysoptimizer\Services\WingetService.cs" Link="WingetService.cs" />
   </ItemGroup>
 
 </Project>

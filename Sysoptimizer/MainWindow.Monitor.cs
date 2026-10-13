@@ -18,6 +18,7 @@ public partial class MainWindow
     private readonly ObservableCollection<ProcessRow> _processRows = new();
     private readonly Dictionary<string, ProcessRow> _processRowMap = new(StringComparer.OrdinalIgnoreCase);
     private List<ProcessUsage> _lastProcesses = new();
+    private List<ProcessUsage> _remoteProcesses = new(); // the watched PC's, while one is shown
     private string _processSort = "cpu";
     private readonly ObservableCollection<OptionItem> _blockedItems = new();
     private long _tick;
@@ -104,7 +105,7 @@ public partial class MainWindow
         }
 
         CheckAlerts(snap, processes);
-        if (processesShown && processes != null) UpdateProcessRows();
+        if (processesShown && processes != null && _source == null) UpdateProcessRows();
         if (PrivacyList.IsVisible && _tick % 5 == 0) RefreshPrivacy();
         if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _pan == null && _tick % 10 == 0) _ = LoadHistory();
 
@@ -155,13 +156,14 @@ public partial class MainWindow
     private void UpdateProcessRows()
     {
         string filter = ProcessFilterBox.Text.Trim();
+        var shown = _source == null ? _lastProcesses : _remoteProcesses;
         Func<ProcessUsage, double> key = _processSort switch { "ram" => p => p.RamMB, "gpu" => p => p.Gpu, _ => p => p.Cpu };
-        var sorted = _lastProcesses
+        var sorted = shown
             .Where(p => filter.Length == 0 || p.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
                         || (p.Description?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false))
             .OrderByDescending(key).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
-        foreach (var gone in _processRowMap.Keys.Except(_lastProcesses.Select(p => p.Name), StringComparer.OrdinalIgnoreCase).ToList())
+        foreach (var gone in _processRowMap.Keys.Except(shown.Select(p => p.Name), StringComparer.OrdinalIgnoreCase).ToList())
             _processRowMap.Remove(gone);
 
         var rows = sorted.Select(p =>
@@ -181,7 +183,7 @@ public partial class MainWindow
             if (current < 0) _processRows.Insert(i, rows[i]);
             else if (current != i) _processRows.Move(current, i);
         }
-        ProcessCountText.Text = $"APP · {_lastProcesses.Count} RUNNING";
+        ProcessCountText.Text = $"APP · {shown.Count} RUNNING" + (_source != null ? $" ON {_source.Name.ToUpperInvariant()}" : "");
     }
 
     private void ProcessSort_Checked(object sender, RoutedEventArgs e)
@@ -195,10 +197,16 @@ public partial class MainWindow
         if (IsLoaded) UpdateProcessRows();
     }
 
-    private void EndTask_Click(object sender, RoutedEventArgs e)
+    private async void EndTask_Click(object sender, RoutedEventArgs e)
     {
         foreach (var row in _processRows.Where(r => r.IsChecked).ToList())
         {
+            if (_source is { } target) // the watched PC ends it (and refuses the ones Windows needs)
+            {
+                row.IsChecked = false;
+                await RunOn(target, $"Ending {row.Name}", t => t.Run("kill", row.Name));
+                continue;
+            }
             if (CriticalProcesses.Contains(row.Name)) { Log($"{row.Name}: not ended — Windows needs it running."); continue; }
             int ended = 0, failed = 0;
             foreach (var p in Process.GetProcessesByName(row.Name))
