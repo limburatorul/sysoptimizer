@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Windows;
@@ -75,7 +76,7 @@ public partial class MainWindow
         if (RemoteCrypto.ParseKey(RemoteKeyBox.Text) == null) RemoteKeyBox.Text = RemoteCrypto.NewKey();
         try
         {
-            _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, () => _liveJson);
+            _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, () => _liveJson, RunRemoteInstall);
         }
         catch (HttpListenerException ex)
         {
@@ -132,6 +133,92 @@ public partial class MainWindow
     {
         using var p = Process.Start(new ProcessStartInfo("netsh.exe", args) { CreateNoWindow = true, UseShellExecute = false });
         p?.WaitForExit(10000);
+    }
+
+    // --- installs a watching PC sends here ---
+
+    /// <summary>Runs on the server's thread: announced here first (tray, log, Events), then installed and reported back.</summary>
+    private string RunRemoteInstall(RemoteInstall job)
+    {
+        string what = job.WingetId ?? job.FileName!;
+        Dispatcher.Invoke(() => Alert($"remote-install:{Guid.NewGuid()}", $"A watching PC is installing {what} here"));
+        string output;
+        bool ok = job.WingetId != null ? WingetService.Install(job.WingetId, out output) : RunInstaller(job, out output);
+        Dispatcher.Invoke(() => Log($"Remote install of {what}: {(ok ? "done." : "failed — " + LastLine(output))}"));
+        return $"{(ok ? "ok" : "failed")}\n{output}";
+    }
+
+    private static bool RunInstaller(RemoteInstall job, out string output)
+    {
+        // The elevated user's own temp folder: other accounts on this PC can't swap the file before it runs.
+        string folder = Path.Combine(Path.GetTempPath(), "Sysoptimizer-install-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(folder);
+            string file = Path.Combine(folder, job.FileName!);
+            File.WriteAllBytes(file, job.File!);
+            // No hidden window: an installer without quiet options shows up for whoever sits at this PC.
+            var psi = file.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)
+                ? new ProcessStartInfo("msiexec.exe", $"/i \"{file}\" /qn /norestart {job.Args}")
+                : new ProcessStartInfo(file, job.Args);
+            psi.UseShellExecute = false;
+            using var process = Process.Start(psi)!;
+            if (!process.WaitForExit(TimeSpan.FromMinutes(30)))
+            {
+                output = "still running after 30 minutes — it may be waiting for someone to click through it on that PC";
+                return false;
+            }
+            output = process.ExitCode switch
+            {
+                0 => "installed",
+                3010 or 1641 => "installed — Windows needs a restart to finish",
+                var code => $"the installer ended with code {code}",
+            };
+            return process.ExitCode is 0 or 3010 or 1641;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            output = ex.Message;
+            return false;
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // still running after the timeout
+        }
+    }
+
+    private static string LastLine(string text) =>
+        text.Split('\n', '\r').Select(l => l.Trim()).LastOrDefault(l => l.Length > 0) ?? "no details";
+
+    // --- installing on the PC being shown ---
+
+    private async Task InstallOn(RemoteHistory target, string what, Func<RemoteHistory, string> send)
+    {
+        Log($"{what}: installing on {target.Name}…");
+        try
+        {
+            string answer = await Task.Run(() => send(target));
+            int split = answer.IndexOf('\n');
+            string detail = LastLine(split < 0 ? "" : answer[(split + 1)..]);
+            Log($"{what} on {target.Name}: {(answer.StartsWith("ok") ? detail : "failed — " + detail)}");
+        }
+        catch (RemoteHistoryException ex) { Log($"{what} on {target.Name}: {ex.Message}."); }
+    }
+
+    private async void InstallRemoteFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_source is not { } target) return;
+        var dialog = new OpenFileDialog { Filter = "Installers (*.exe, *.msi)|*.exe;*.msi", Title = $"Install on {target.Name}" };
+        if (dialog.ShowDialog(this) != true) return;
+        string name = Path.GetFileName(dialog.FileName);
+        if (RemoteInstall.SafeFileName(name) == null) { Log($"{name}: only .exe and .msi files with names up to 128 characters can be sent."); return; }
+        if (new FileInfo(dialog.FileName).Length > RemoteInstall.MaxFileBytes) { Log($"{name} is over 512 MB — too big to send; install it from a shared folder instead."); return; }
+        string args = InstallArgsBox.Text.Trim();
+        byte[] bytes;
+        try { bytes = await File.ReadAllBytesAsync(dialog.FileName); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log($"{name}: couldn't read it — {ex.Message}"); return; }
+        await InstallOn(target, name, t => t.InstallFile(name, bytes, args));
     }
 
     // --- watching another PC ---
@@ -198,7 +285,10 @@ public partial class MainWindow
         RetentionCombo.IsEnabled = source == null; // retention is this PC's own setting
         Title = source == null ? "Sysoptimizer" : $"Sysoptimizer — watching {source.Name}";
         // What acts on this PC (health, cleanup, freeing memory) has no place while another one is shown.
-        HealthCardBorder.Visibility = FreeMemoryButton.Visibility = source == null ? Visibility.Visible : Visibility.Collapsed;
+        HealthCardBorder.Visibility = FreeMemoryButton.Visibility = UpgradeAllButton.Visibility = source == null ? Visibility.Visible : Visibility.Collapsed;
+        // Installing follows the PC being shown.
+        RemoteInstallPanel.Visibility = source == null ? Visibility.Collapsed : Visibility.Visible;
+        InstallSelectedButton.Content = source == null ? "Install selected" : $"Install selected on {source.Name}";
         ResetLiveGraphs();
         if (_historyApp != null) HistoryAppClear_Click(this, new RoutedEventArgs());
         if (!IsLoaded) return;

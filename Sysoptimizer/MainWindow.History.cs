@@ -104,6 +104,7 @@ public partial class MainWindow
     private readonly Dictionary<(DateTime Day, bool Minutely), (HistoryData Data, DateTime LoadedAt)> _dayCache = new();
     private readonly HashSet<(DateTime Day, bool Minutely)> _dayLoading = new();
     private bool _histProcsDirty;
+    private bool _histWatts; // the range has CPU or GPU draw recorded, so the Power and Battery lists can rank apps by watts
     private const int CachedDays = 10; // ~5 MB a day at per-second resolution
 
     /// <summary>Re-reads what changed (today) and shows the committed range — buttons, ticks, end of a drag.</summary>
@@ -138,6 +139,7 @@ public partial class MainWindow
 
         (_historyFrom, _historyTo, _historyMinutely, _hist) = (from, to, minutely, data);
         _histProcsDirty = true;
+        _histWatts = data.System.Exists(s => s.CpuWatts > 0 || s.GpuWatts > 0);
         HistoryRangeText.Text = (_source != null ? $"{_source.Name} · " : "") + $"{from:ddd d MMM HH:mm} – {to:ddd d MMM HH:mm}"
             + (_sourceError != null ? $" · {_source?.Name ?? "history"}: {_sourceError}" : !complete ? " · loading…" : data.System.Count == 0 ? " · nothing recorded" : "")
             + (minutely ? " · per-minute peaks (click to zoom in to every second)" : "");
@@ -189,6 +191,20 @@ public partial class MainWindow
     private void UpdateRangeList()
     {
         HistoryRangeTitle.Text = $"TOP APPS IN THIS RANGE (AVERAGE {MetricLabel().ToUpperInvariant()})";
+        if (ListMetric == "watts")
+        {
+            int snapshots = Math.Max(1, _hist.Processes.Select(p => p.Time).Distinct().Count());
+            HistoryRangeList.ItemsSource = _hist.Processes.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => (Name: g.Key, Watts: g.Sum(WattsOf) / snapshots, PeakCpu: g.Max(p => p.Cpu), PeakGpu: g.Max(p => p.Gpu)))
+                .Where(t => t.Watts > 0).OrderByDescending(t => t.Watts).Take(10)
+                .Select(t => new OptionItem
+                {
+                    Name = t.Name,
+                    Description = $"CPU peak {t.PeakCpu:0}%" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
+                    Note = $"{t.Watts:0.0} W",
+                }).ToList();
+            return;
+        }
         HistoryRangeList.ItemsSource = HistoryStore.TopProcesses(_hist.Processes, SortKey()).Select(t => new OptionItem
         {
             Name = t.Name,
@@ -244,9 +260,22 @@ public partial class MainWindow
 
     private static string FormatMB(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";
     // The app lists rank by CPU on the Disk and Network views: per-app disk and network use isn't recorded.
+    // On Power and Battery they rank by estimated watts, when the sensors gave the CPU or GPU draw.
     private bool SystemOnlyMetric => _historyMetric is "disk" or "net" or "power" or "fan" or "battery";
-    private string ListMetric => SystemOnlyMetric ? "cpu" : _historyMetric;
-    private string MetricLabel() => ListMetric switch { "mem" => "Memory", "gpu" => "GPU", _ => "CPU" };
+    private string ListMetric => _historyMetric is "power" or "battery" && _histWatts ? "watts" : SystemOnlyMetric ? "cpu" : _historyMetric;
+    private string MetricLabel() => ListMetric switch { "mem" => "Memory", "gpu" => "GPU", "watts" => "estimated power", _ => "CPU" };
+
+    /// <summary>
+    /// An app's estimated draw: the CPU's watts split by each app's share of the CPU use, the same for the GPU —
+    /// the way Task Manager's "Power usage" guesses it. Screen, Wi-Fi and the rest of the board aren't counted.
+    /// </summary>
+    private float WattsOf(ProcSample p)
+    {
+        var s = Nearest(_hist.System, p.Time, x => x.Time);
+        static float Part(float app, float total, float watts) =>
+            app > 0 && watts > 0 && total > 0 ? Math.Min(1, app / total) * watts : 0;
+        return Part(p.Cpu, s.Cpu, s.CpuWatts) + Part(p.Gpu, s.Gpu, s.GpuWatts);
+    }
     private string SortKey() => ListMetric switch { "mem" => "ram", "gpu" => "gpu", _ => "cpu" };
 
     private string? _historyApp; // null = the whole PC; otherwise the chart plots this one app
@@ -934,11 +963,11 @@ public partial class MainWindow
             {
                 Name = p.Name,
                 Description = FormatMB(p.RamMB) + (p.Gpu >= 1 ? $" · GPU {p.Gpu:0}%" : ""),
-                Note = $"{p.Cpu:0.0}% CPU",
+                Note = ListMetric == "watts" ? $"{WattsOf(p):0.0} W" : $"{p.Cpu:0.0}% CPU",
             }).ToList();
     }
 
-    private float MetricOf(ProcSample p) => ListMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, _ => p.Cpu };
+    private float MetricOf(ProcSample p) => ListMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, "watts" => WattsOf(p), _ => p.Cpu };
 
     private void EnsureProcessIndex()
     {
@@ -997,7 +1026,7 @@ public partial class MainWindow
         var rows = (StackPanel)_cursorValue!.Child;
         rows.Children.Clear();
         bool mem = ListMetric == "mem";
-        string Amount(float v) => mem ? FormatMB(v) : v < 10 ? $"{v:0.0}%" : $"{v:0}%";
+        string Amount(float v) => mem ? FormatMB(v) : ListMetric == "watts" ? $"{v:0.0} W" : v < 10 ? $"{v:0.0}%" : $"{v:0}%";
         double raw = value * _scale / 100;
 
         rows.Children.Add(CardRow(time.ToLocalTime().ToString(_historyMinutely ? "ddd d MMM HH:mm" : "ddd d MMM HH:mm:ss"),
@@ -1020,7 +1049,7 @@ public partial class MainWindow
             var at = _hist.System.Count > 0 ? Nearest(_hist.System, time, x => x.Time) : default;
             if (_historyMetric == "power" && !float.IsNaN(at.CpuWatts + at.GpuWatts))
                 rows.Children.Add(CardRow($"CPU {at.CpuWatts:0} W · GPU {at.GpuWatts:0} W", "", secondary: true, bottom: 2));
-            rows.Children.Add(CardRow("Not recorded per app — the top CPU users then:", "", secondary: true, bottom: 2));
+            rows.Children.Add(CardRow(ListMetric == "watts" ? "Estimated per app, from CPU and GPU use:" : "Not recorded per app — the top CPU users then:", "", secondary: true, bottom: 2));
         }
         var ranked = apps.Where(p => MetricOf(p) > 0).OrderByDescending(MetricOf).ToList();
         foreach (var p in ranked.Take(5)) rows.Children.Add(CardRow(p.Name, Amount(MetricOf(p))));

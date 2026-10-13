@@ -758,9 +758,11 @@ public partial class MainWindow : Window
 
     private async void InstallApps_Click(object sender, RoutedEventArgs e)
     {
+        var target = _source; // the PC being shown when the button was clicked
         foreach (var item in _appItems.Where(i => i.IsChecked).ToList())
         {
             string id = (string)item.Tag!;
+            if (target != null) { await InstallOn(target, item.Name, t => t.Install(id)); continue; }
             Log($"{item.Name}: installing...");
             var (ok, output) = await Task.Run(() =>
             {

@@ -5,6 +5,7 @@
         Background="Transparent" FontSize="13" FontFamily="{DynamicResource UiFont}" Foreground="{DynamicResource TextPrimary}">
 
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <DataTemplate x:Key="HistoryRowTemplate">
             <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,5">
                 <DockPanel>
@@ -47,7 +48,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
-            <RowDefinition Height="160" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="{DynamicResource Surface}">
@@ -620,8 +621,15 @@
                             <Border x:Name="InstallPage" Visibility="Collapsed">
                                 <DockPanel Margin="16">
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                                        <Button Content="Update all (winget)" Click="UpgradeAll_Click" Margin="0,0,8,0" />
-                                        <Button Content="Install selected" Style="{StaticResource PrimaryButton}" Click="InstallApps_Click" />
+                                        <Button x:Name="UpgradeAllButton" Content="Update all (winget)" Click="UpgradeAll_Click" Margin="0,0,8,0" />
+                                        <Button x:Name="InstallSelectedButton" Content="Install selected" Style="{StaticResource PrimaryButton}" Click="InstallApps_Click" />
+                                        <StackPanel x:Name="RemoteInstallPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="16,0,0,0">
+                                            <Button Content="Install a file…" Click="InstallRemoteFile_Click"
+                                                    ToolTip="Send an .exe or .msi (up to 512 MB) to the PC being shown and run it there" />
+                                            <TextBlock Text="with options" VerticalAlignment="Center" Margin="10,0,6,0" Foreground="{DynamicResource TextSecondary}" />
+                                            <TextBox x:Name="InstallArgsBox" Width="160" MaxLength="1024" VerticalContentAlignment="Center" AutomationProperties.Name="Installer options"
+                                                     ToolTip="Passed to an .exe installer, such as /S, /silent or /quiet. Without them, the installer waits for someone to click through it on that PC. An .msi always installs quietly." />
+                                        </StackPanel>
                                     </StackPanel>
                                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                                         <ItemsControl x:Name="AppsList">
@@ -776,7 +784,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Share this PC's history" FontWeight="SemiBold" />
                                     <TextBlock Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"
-                                               Text="Lets another PC running Sysoptimizer watch this one's history, without remote desktop and its overhead. Read-only, encrypted, and only for whoever has the access key. The firewall is opened for private networks only." />
+                                               Text="Lets another PC running Sysoptimizer watch this one's history, without remote desktop and its overhead. Encrypted, and only for whoever has the access key — which also lets that PC install apps here, so share it only with PCs you trust. The firewall is opened for private networks only." />
                                     <StackPanel Orientation="Horizontal">
                                         <CheckBox x:Name="RemoteServerCheck" Content="Allow, on port" VerticalAlignment="Center" Click="RemoteServer_Click" />
                                         <TextBox x:Name="RemotePortBox" Width="76" Margin="8,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Port" />
@@ -839,7 +847,8 @@
             <DockPanel Margin="16,10">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource CaseLabel}" Tag="Log" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                        <ToggleButton x:Name="LogToggle" Content="Log" Style="{StaticResource PillToggle}" IsChecked="False"
+                                      ToolTip="Show or hide the log" AutomationProperties.Name="Show log" />
                         <TextBlock Style="{StaticResource CaseLabel}" Tag="Theme" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
                         <RadioButton x:Name="ThemeGlass" Content="Glass" GroupName="Theme" Tag="Glass" Style="{StaticResource PillToggle}" Checked="Theme_Checked" />
                         <RadioButton x:Name="ThemeStarTrek" Content="Star Trek" GroupName="Theme" Tag="StarTrek" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
@@ -849,7 +858,8 @@
                         <ComboBox x:Name="HistorySourceCombo" Width="150" VerticalAlignment="Center" SelectionChanged="HistorySource_Changed" AutomationProperties.Name="Which PC to show" ToolTip="This PC, or one added under About → Remote monitoring: Resources, Disks, Network, History and Events follow it" />
                     </StackPanel>
                 </DockPanel>
-                <ScrollViewer Style="{StaticResource GlassScrollViewer}" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer Style="{StaticResource GlassScrollViewer}" VerticalScrollBarVisibility="Auto" Height="114" Margin="0,4,0,0"
+                              Visibility="{Binding IsChecked, ElementName=LogToggle, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock x:Name="LogText" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="{DynamicResource LogForeground}" />
                 </ScrollViewer>
             </DockPanel>

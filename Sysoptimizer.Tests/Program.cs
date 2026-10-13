@@ -116,7 +116,9 @@ try
 
     int port;
     { var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); probe.Start(); port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; probe.Stop(); }
-    using (new HistoryServer(port, key, () => "{\"CpuPercent\":42}"u8.ToArray(), "localhost"))
+    var installs = new List<RemoteInstall>();
+    string FakeInstall(RemoteInstall job) { lock (installs) installs.Add(job); return "ok\ndone"; }
+    using (new HistoryServer(port, key, () => "{\"CpuPercent\":42}"u8.ToArray(), FakeInstall, "localhost"))
     {
         var client = new RemoteHistory("test", "localhost", port, key);
         Check(client.Hello() == Environment.MachineName, "remote: the server says who it is");
@@ -135,6 +137,28 @@ try
         var intruder = new RemoteHistory("x", "localhost", port, otherKey);
         try { intruder.Hello(); Check(false, "remote: the wrong key gets nothing"); }
         catch (RemoteHistoryException ex) { Check(ex.Message.Contains("refused"), "remote: the wrong key gets nothing"); }
+
+        // Installs: a winget id, an uploaded installer with its options, and what must be refused.
+        Check(client.Install("Notepad++.Notepad++").StartsWith("ok") && installs[^1].WingetId == "Notepad++.Notepad++", "install: a winget package reaches the installer");
+        var setup = System.Security.Cryptography.RandomNumberGenerator.GetBytes(100_000);
+        client.InstallFile("setup v2.exe", setup, @"/S /D=C:\Program Files\X");
+        Check(installs[^1] is { FileName: "setup v2.exe", Args: @"/S /D=C:\Program Files\X" } j && j.File!.SequenceEqual(setup), "install: an uploaded file arrives intact, with its options");
+        Check(RemoteInstall.SafeFileName(@"..\evil.exe") == null && RemoteInstall.SafeFileName("a.bat") == null && RemoteInstall.SafeFileName("x.MSI") == "x.MSI", "install: only bare .exe/.msi names");
+        Check(!RemoteInstall.IsWingetId("a b") && !RemoteInstall.IsWingetId("x;calc") && RemoteInstall.IsWingetId("7zip.7zip"), "install: winget ids are checked");
+        int before = installs.Count;
+        try { client.InstallFile(@"..\evil.exe", setup, ""); } catch (RemoteHistoryException) { }
+        Check(installs.Count == before, "install: a path in the file name is refused");
+        // The same signed request sent twice runs once.
+        string ip = HistoryServer.Prefix + "install?winget=7zip.7zip";
+        long it = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        using var poster = new System.Net.Http.HttpClient();
+        System.Net.HttpStatusCode Post()
+        {
+            using var m = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, $"http://localhost:{port}{ip}");
+            m.Headers.Add("X-Time", it.ToString()); m.Headers.Add("X-Auth", RemoteCrypto.Sign(key, ip, it));
+            return poster.Send(m).StatusCode;
+        }
+        Check(Post() == System.Net.HttpStatusCode.OK && Post() == System.Net.HttpStatusCode.BadRequest && installs.Count == before + 1, "install: a replayed request doesn't run again");
     }
 }
 catch (Exception ex)
