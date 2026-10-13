@@ -319,18 +319,16 @@ public partial class MainWindow
         }
     }
 
-    private static string CardStatus(ResourceSnapshot s) => string.Join(" · ", new[]
+    // One reading per line, always in the same order, so every card has the same shape and none jumps as the numbers change.
+    private static string CardStatus(ResourceSnapshot s) => string.Join("\n", new[]
     {
-        $"CPU {s.CpuPercent:0}%" + (double.IsNaN(s.CpuTempC) ? "" : $" {s.CpuTempC:0}°C"),
-        $"MEM {s.MemPercent:0}%",
-        s.GpuAvailable ? $"GPU {s.GpuPercent:0}%" + (double.IsNaN(s.GpuTempC) ? "" : $" {s.GpuTempC:0}°C") : null,
-        s.Battery is { } b ? $"battery {b.Percent:0}%{(b.PluggedIn ? "" : " (unplugged)")}" : null,
+        $"CPU {s.CpuPercent:0}%" + (double.IsNaN(s.CpuTempC) ? "" : $" · {s.CpuTempC:0}°C"),
+        $"RAM {s.MemPercent:0}%",
+        s.GpuAvailable ? $"GPU {s.GpuPercent:0}%" + (double.IsNaN(s.GpuTempC) ? "" : $" · {s.GpuTempC:0}°C") : null,
+        s.Drives.Count > 0 ? $"Disk {s.Drives.Min(d => d.TotalGB > 0 ? d.FreeGB / d.TotalGB * 100 : 100):0}% free (fullest drive)" : null,
+        s.Battery is { } b ? $"Battery {b.Percent:0}%{(b.PluggedIn ? "" : " (unplugged)")}" : null,
         double.IsNaN(s.Fps) ? null : $"{s.Fps:0} FPS in {s.FpsApp}",
-        s.Drives.Count > 0 ? $"least free disk {s.Drives.Min(d => d.TotalGB > 0 ? d.FreeGB / d.TotalGB * 100 : 100):0}%" : null,
-    }.Where(x => x != null)
-     // Each reading stays whole (no-break spaces, and a word joiner so "38°C" can't split at the degree sign):
-     // a line only wraps between readings, so the card's height doesn't jump as the numbers change.
-     .Select(x => x!.Replace(" ", "\u00A0").Replace("°C", "°\u2060C")));
+    }.Where(x => x != null));
 
     private void RemoteAlerts_Click(object sender, RoutedEventArgs e)
     {

@@ -121,7 +121,7 @@ public sealed class PhoneServer : IDisposable
           h1 { font-size: 18px; margin: 0 0 12px; }
           .card { background: #1b212b; border: 1px solid #2a3240; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
           .name { font-weight: 600; } .dot { color: #ef4444; } .on .dot { color: #22c55e; }
-          .status { color: #9aa5b5; font-size: 13px; margin-top: 3px; } .note { color: #6b7686; font-size: 12px; }
+          .status { color: #9aa5b5; font-size: 13px; margin-top: 3px; white-space: pre-line; } .note { color: #6b7686; font-size: 12px; }
         </style></head><body>
         <h1>Sysoptimizer</h1><div id="pcs"></div><div class="note" id="note">Loading…</div>
         <script>
