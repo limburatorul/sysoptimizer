@@ -19,7 +19,8 @@ namespace Sysoptimizer.Services;
 ///   • every answer is sealed with AES-GCM under a key derived from the access key, bound to the request
 ///     it answers — the LAN sees neither what ran nor when, and can't alter or replay it;
 ///   • besides reading, the key lets the watcher act here — install apps (winget, a link, or an .exe/.msi it
-///     uploads, sealed the same way), update them, end an app, clean up, restart or shut down; each such
+///     uploads, sealed the same way), update them, end an app, clean up, restart or shut down, or drop a file
+///     in its Downloads folder; each such
 ///     request runs once. The key can be random, or derived from a password (PBKDF2, with this PC's salt);
 ///   • the firewall rules are for private networks only; a UDP probe on the same port finds sharing PCs.
 /// Free of WPF so the self-test can exercise it.
@@ -109,10 +110,19 @@ public sealed record RemoteCommand(string Action, string? Target, byte[]? File, 
 
     public static bool IsWingetId(string? id) => id != null && WingetIdPattern.IsMatch(id);
 
+    private static readonly Regex DeviceName = new(@"^(CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³])$", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The name if it's a bare file name (no folders) Windows saves as typed, else null: no device names
+    /// like NUL or CON.txt, no trailing dot or space (Windows would drop them).
+    /// </summary>
+    public static string? PlainFileName(string? name) =>
+        name is { Length: > 0 and <= 128 } && name == Path.GetFileName(name) && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
+        && !name.EndsWith('.') && !name.EndsWith(' ') && !DeviceName.IsMatch(name.Split('.')[0].TrimEnd()) ? name : null;
+
     /// <summary>The name if it's a bare .exe or .msi file name (no folders), else null.</summary>
     public static string? SafeFileName(string? name) =>
-        name is { Length: > 4 and <= 128 } && name == Path.GetFileName(name) && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
-        && (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) ? name : null;
+        PlainFileName(name) is { Length: > 4 } && (name!.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) ? name : null;
 
     public static bool IsHttpsLink(string? url) =>
         url is { Length: <= 2048 } && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
@@ -132,6 +142,7 @@ public sealed record RemoteCommand(string Action, string? Target, byte[]? File, 
         {
             "install-winget" when IsWingetId(target) && file == null => new(action, target, null, ""),
             "install-file" when SafeFileName(target) != null && file != null => new(action, target, file, args),
+            "receive-file" when PlainFileName(target) != null && file != null && args.Length == 0 => new(action, target, file, ""),
             "install-url" when IsHttpsLink(target) && file == null => new(action, target, null, args),
             "kill" when IsProcessName(target) && file == null => new(action, target, null, ""),
             "startup-enable" or "startup-disable" or "service-enable" or "service-disable" when IsName(target) && file == null => new(action, target, null, ""),
@@ -426,7 +437,7 @@ public sealed class RemoteHistory
 
     /// <summary>
     /// Asks the PC to do something (see <see cref="RemoteCommand"/>); returns its "ok"/"failed" line and details.
-    /// An installer to upload goes in <paramref name="file"/>.
+    /// A file to upload (an installer, or one to drop in Downloads) goes in <paramref name="file"/>.
     /// </summary>
     public string Run(string what, string? target = null, string args = "", byte[]? file = null) =>
         Send(HttpMethod.Post, $"do?what={what}" + (target != null ? $"&target={Uri.EscapeDataString(target)}" : "")

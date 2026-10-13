@@ -199,6 +199,13 @@ try
             try { client.Run(what, target, "", what == "install-file" ? setup : null); } catch (RemoteHistoryException) { }
         Check(commands.Count == before, "command: paths, plain http, bad ids, unknown actions refused");
         Check(RemoteCommand.SafeFileName("a.bat") == null && RemoteCommand.SafeFileName("x.MSI") == "x.MSI", "command: only bare .exe/.msi names");
+        client.Run("receive-file", "photos 2026.zip", "", setup);
+        Check(commands[^1] is { Action: "receive-file", Target: "photos 2026.zip" } r && r.File!.SequenceEqual(setup), "command: a sent file arrives intact");
+        before = commands.Count;
+        foreach (var name in new[] { @"..\x.txt", "NUL", "con.txt", "COM1.log", "notes.", "a:b.txt" })
+            try { client.Run("receive-file", name, "", setup); } catch (RemoteHistoryException) { }
+        try { client.Run("receive-file", "ok.txt", "/S", setup); } catch (RemoteHistoryException) { }
+        Check(commands.Count == before && RemoteCommand.PlainFileName("console.txt") == "console.txt", "command: sent files only under names Windows saves as typed, no options");
         // The same signed request sent twice runs once.
         string ip = HistoryServer.Prefix + "do?what=cleanup";
         long it = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

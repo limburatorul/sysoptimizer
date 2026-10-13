@@ -58,7 +58,11 @@
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                         <StackPanel Margin="16">
                             <StackPanel x:Name="WatchedPcsPanel" Visibility="Collapsed" Margin="0,0,0,16">
-                                <TextBlock Style="{StaticResource CaseLabel}" Tag="Watched PCs" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                <DockPanel Margin="0,0,10,6">
+                                    <Button x:Name="AllPcsButton" DockPanel.Dock="Right" Content="All PCs ⋯" Click="PcActions_Click" Padding="10,2" FontSize="11" Visibility="Collapsed"
+                                            ToolTip="Update apps, clean up, send files, restart or shut down every watched PC at once" />
+                                    <TextBlock Style="{StaticResource CaseLabel}" Tag="Watched PCs" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </DockPanel>
                                 <ItemsControl x:Name="WatchedPcsList">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -67,11 +71,11 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border x:Name="Card" Width="345" Padding="14,10" Margin="0,0,10,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                            <Border x:Name="Card" Width="345" Padding="14,10" Margin="0,0,10,10" AllowDrop="True" Drop="PcCard_Drop" DragOver="PcCard_DragOver" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                                 <DockPanel>
                                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                                                         <Button x:Name="ShowButton" Content="Show" Tag="{Binding}" Click="PcShow_Click" Margin="6,0,0,0" AutomationProperties.Name="{Binding Name, StringFormat=Show {0} in every tab}" />
-                                                        <Button Content="⋯" Tag="{Binding}" Click="PcActions_Click" Margin="6,0,0,0" ToolTip="Update apps, clean up, restart or shut down" AutomationProperties.Name="{Binding Name, StringFormat=Actions on {0}}" />
+                                                        <Button Content="⋯" Tag="{Binding}" Click="PcActions_Click" Margin="6,0,0,0" ToolTip="Update apps, clean up, send files, restart or shut down" AutomationProperties.Name="{Binding Name, StringFormat=Actions on {0}}" />
                                                     </StackPanel>
                                                     <StackPanel>
                                                         <TextBlock>
@@ -350,6 +354,8 @@
                                 <Button Content="&#xE76B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Padding="12,4" FontSize="11" VerticalAlignment="Center" Click="HistoryPrev_Click" Margin="12,0,0,0" ToolTip="Earlier" AutomationProperties.Name="Earlier" />
                                 <Button Content="&#xE76C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Padding="12,4" FontSize="11" VerticalAlignment="Center" Click="HistoryNext_Click" Margin="6,0,0,0" ToolTip="Later" AutomationProperties.Name="Later" />
                                 <Button Content="Now" Padding="12,4" FontSize="11" VerticalAlignment="Center" Click="HistoryNow_Click" Margin="6,0,0,0" />
+                                <ToggleButton x:Name="HistoryCompareToggle" Content="Compare" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryCompare_Click" Unchecked="HistoryCompare_Click"
+                                              ToolTip="Draws the same length of time just before this one as a dashed line, and compares their averages and peaks" />
                                 <RadioButton x:Name="HistoryMetricCpu" Content="CPU" GroupName="HistoryMetric" Tag="cpu" Style="{StaticResource PillToggle}" IsChecked="True" Margin="16,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="Memory" GroupName="HistoryMetric" Tag="mem" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="GPU" GroupName="HistoryMetric" Tag="gpu" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
@@ -364,6 +370,7 @@
                                         Click="HistoryAppClear_Click" ToolTip="Back to the whole PC" />
                             </StackPanel>
                         </DockPanel>
+                        <TextBlock x:Name="CompareText" DockPanel.Dock="Top" Margin="0,0,0,10" TextWrapping="Wrap" Visibility="Collapsed" />
                         <!-- On the Power chart: what the electricity in view cost -->
                         <WrapPanel x:Name="EnergyPanel" DockPanel.Dock="Top" Margin="0,0,0,10" Visibility="Collapsed">
                             <WrapPanel.Resources>

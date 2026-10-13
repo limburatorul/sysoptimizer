@@ -17,7 +17,7 @@ namespace Sysoptimizer;
 /// <summary>
 /// Remote monitoring (see RemoteHistory.cs): this PC can share its history with a key or a password, and
 /// every tab can show another PC instead of this one — and act on it (install, update, end an app, clean up,
-/// restart, shut down).
+/// send it files, restart, shut down), one PC at a time or all of them at once.
 /// </summary>
 public partial class MainWindow
 {
@@ -207,6 +207,7 @@ public partial class MainWindow
             "service-disable" => $"stopping and disabling the {command.Target} service",
             "install-winget" or "install-file" => $"installing {command.Target}",
             "install-url" => $"installing from {command.Target}",
+            "receive-file" => $"sending {command.Target} to the Downloads folder",
             "upgrade-all" => "updating every app",
             "kill" => $"ending {command.Target}",
             "cleanup" => "cleaning up temporary files",
@@ -220,6 +221,7 @@ public partial class MainWindow
             "install-winget" => WingetService.Install(command.Target!, out output),
             "install-file" => RunInstaller(command.Target!, folder => File.WriteAllBytes(Path.Combine(folder, command.Target!), command.File!), command.Args, out output),
             "install-url" => InstallFromLink(command.Target!, command.Args, out output),
+            "receive-file" => SaveReceived(command.Target!, command.File!, out output),
             "upgrade-all" => WingetService.UpgradeAll(out output),
             "kill" => EndApp(command.Target!, out output),
             "cleanup" => CleanAll(out output),
@@ -296,6 +298,33 @@ public partial class MainWindow
                 response.Content.ReadAsStream().CopyTo(target);
             }, args, out output);
         }
+    }
+
+    /// <summary>
+    /// A file sent from a watching PC, saved in Downloads under its own name — or "name (2).ext" beside one
+    /// already there, never over it. Marked as from the internet, as a browser would, so Windows asks before
+    /// running a program that arrived this way.
+    /// </summary>
+    private static bool SaveReceived(string name, byte[] bytes, out string output)
+    {
+        string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        string stem = Path.GetFileNameWithoutExtension(name), ext = Path.GetExtension(name);
+        try
+        {
+            Directory.CreateDirectory(folder);
+            for (int n = 1; ; n++)
+            {
+                string path = Path.Combine(folder, n == 1 ? name : $"{stem} ({n}){ext}");
+                FileStream file;
+                try { file = new FileStream(path, FileMode.CreateNew); }
+                catch (IOException) when (File.Exists(path) && n < 1000) { continue; }
+                using (file) file.Write(bytes);
+                File.WriteAllText(path + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
+                output = $"saved in Downloads as {Path.GetFileName(path)}";
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { output = $"couldn't save it — {ex.Message}"; return false; }
     }
 
     private static bool EndApp(string name, out string output)
@@ -407,10 +436,16 @@ public partial class MainWindow
         await RunOn(target, $"Installing from {url}", t => t.Run("install-url", url, args));
     }
 
-    /// <summary>The actions on a watched PC's card (Resources tab): update apps, clean up, restart, shut down.</summary>
+    /// <summary>
+    /// The actions on a watched PC's card (Resources tab) — or, from "All PCs", on every watched PC at once:
+    /// update apps, clean up, send files, wake, restart, shut down.
+    /// </summary>
     private void PcActions_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: PcCard card } button || _remotes.FirstOrDefault(r => r.Name == card.Name) is not { } target) return;
+        if (sender is not Button button) return;
+        var targets = button.Tag is PcCard card ? _remotes.Where(r => r.Name == card.Name).ToList() : _remotes.ToList();
+        if (targets.Count == 0) return;
+        string who = targets.Count == 1 ? targets[0].Name : $"all {targets.Count} watched PCs";
         var menu = new ContextMenu { PlacementTarget = button, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
         void Add(string header, string action, string? confirm = null)
         {
@@ -418,21 +453,62 @@ public partial class MainWindow
             item.Click += async (_, _) =>
             {
                 if (confirm != null && MessageBox.Show(this, confirm, "Sysoptimizer", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
-                await RunOn(target, header.TrimEnd('…'), t => t.Run(action));
+                await Task.WhenAll(targets.Select(target => RunOn(target, header.TrimEnd('…'), t => t.Run(action))));
             };
             menu.Items.Add(item);
         }
         Add("Update all apps", "upgrade-all");
         Add("Clean up temporary files", "cleanup");
         Add("Update Sysoptimizer", "update-app");
+        var send = new MenuItem { Header = "Send files…", ToolTip = "Saved in its Downloads folder. You can also drop files on a PC's card." };
+        send.Click += async (_, _) =>
+        {
+            var dialog = new OpenFileDialog { Multiselect = true, Title = $"Send to {who}" };
+            if (dialog.ShowDialog(this) == true) await SendFiles(targets, dialog.FileNames);
+        };
+        menu.Items.Add(send);
         menu.Items.Add(new Separator());
-        var wake = new MenuItem { Header = "Wake up", IsEnabled = target.Macs.Length > 0,
-            ToolTip = target.Macs.Length > 0 ? "Sends a Wake-on-LAN packet (it must be allowed in that PC's BIOS)" : "Its network address is learned once it answers with Sysoptimizer 1.9 or newer" };
-        wake.Click += async (_, _) => await Wake(target);
+        bool wakeable = targets.Any(t => t.Macs.Length > 0);
+        var wake = new MenuItem { Header = "Wake up", IsEnabled = wakeable,
+            ToolTip = wakeable ? "Sends a Wake-on-LAN packet (it must be allowed in that PC's BIOS)" : "A PC's network address is learned once it answers with Sysoptimizer 1.9 or newer" };
+        wake.Click += async (_, _) => await Task.WhenAll(targets.Select(Wake));
         menu.Items.Add(wake);
-        Add("Restart…", "restart", $"Restart {target.Name}? Whoever is using it gets a minute's notice to save their work.");
-        Add("Shut down…", "shutdown", $"Shut {target.Name} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
+        Add("Restart…", "restart", $"Restart {who}? Whoever is using it gets a minute's notice to save their work.");
+        Add("Shut down…", "shutdown", $"Shut {who} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
         menu.IsOpen = true;
+    }
+
+    /// <summary>Files dropped on a watched PC's card go to that PC's Downloads folder.</summary>
+    private async void PcCard_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PcCard card } && e.Data.GetData(DataFormats.FileDrop) is string[] paths
+            && _remotes.FirstOrDefault(r => r.Name == card.Name) is { } target)
+            await SendFiles(new() { target }, paths);
+    }
+
+    private void PcCard_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    /// <summary>One file at a time, to each PC at once: a file is read whole and sealed in memory, up to 512 MB.</summary>
+    private async Task SendFiles(List<RemoteHistory> targets, IEnumerable<string> paths)
+    {
+        foreach (string path in paths)
+        {
+            string name = Path.GetFileName(path);
+            if (Directory.Exists(path)) { Log($"{name} is a folder — send the files in it, or a .zip of it."); continue; }
+            if (RemoteCommand.PlainFileName(name) == null) { Log($"{name}: Windows can't save it under that name (or it's over 128 characters) — rename it first."); continue; }
+            byte[] bytes;
+            try
+            {
+                if (new FileInfo(path).Length > RemoteCommand.MaxFileBytes) { Log($"{name} is over 512 MB — too big to send."); continue; }
+                bytes = await File.ReadAllBytesAsync(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log($"{name}: couldn't read it — {ex.Message}"); continue; }
+            await Task.WhenAll(targets.Select(target => RunOn(target, $"Sending {name}", t => t.Run("receive-file", name, "", bytes))));
+        }
     }
 
     private void PcShow_Click(object sender, RoutedEventArgs e)
@@ -519,6 +595,7 @@ public partial class MainWindow
         foreach (var gone in _pcCards.Where(c => !_remotes.Any(r => r.Name == c.Name)).ToList()) _pcCards.Remove(gone);
         foreach (var r in _remotes.Where(r => !_pcCards.Any(c => c.Name == r.Name))) _pcCards.Add(new PcCard { Name = r.Name });
         WatchedPcsPanel.Visibility = _pcCards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        AllPcsButton.Visibility = _pcCards.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         if (IsLoaded) RefreshSchedule();
         string? selected = select ?? _source?.Name;
         HistorySourceCombo.Items.Clear();

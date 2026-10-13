@@ -217,7 +217,15 @@ public partial class MainWindow
             data.Events.AddRange(Slice(cached.Data.Events, e => e.Time, fromUtc, toUtc));
         }
 
-        (_historyFrom, _historyTo, _historyMinutely, _hist) = (from, to, minutely, data);
+        var before = new List<SysSample>();
+        if (_compare)
+            for (var day = (from - (to - from)).Date; day <= from.Date; day = day.AddDays(1))
+            {
+                if (!_dayCache.TryGetValue((day, minutely), out var cached)) { RequestDay(day, minutely); complete = false; continue; }
+                before.AddRange(Slice(cached.Data.System, s => s.Time, (from - (to - from)).ToUniversalTime(), fromUtc.AddTicks(-1)));
+            }
+
+        (_historyFrom, _historyTo, _historyMinutely, _hist, _before) = (from, to, minutely, data, before);
         _histProcsDirty = true;
         _histWatts = data.System.Exists(s => s.CpuWatts > 0 || s.GpuWatts > 0);
         HistoryRangeText.Text = (_source != null ? $"{_source.Name} · " : "") + $"{from:ddd d MMM HH:mm} – {to:ddd d MMM HH:mm}"
@@ -252,7 +260,7 @@ public partial class MainWindow
             if (t.IsCompletedSuccessfully) { _dayCache[key] = (t.Result, DateTime.Now); _sourceError = null; }
             else _sourceError = t.Exception?.InnerException?.Message; // shown under the chart; the next refresh retries
             TrimDayCache();
-            if (_historyFrom.Date <= day && day <= _historyTo.Date) ShowRange(_historyFrom, _historyTo, final: !_navDragging);
+            if (ViewFrom.Date <= day && day <= _historyTo.Date) ShowRange(_historyFrom, _historyTo, final: !_navDragging);
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
@@ -263,7 +271,7 @@ public partial class MainWindow
         foreach (var key in _dayCache.Keys.OrderByDescending(k => Math.Abs((k.Day - center).TotalDays)).ToList())
         {
             if (_dayCache.Count <= CachedDays) break;
-            if (key.Day >= _historyFrom.Date && key.Day <= _historyTo.Date) continue;
+            if (key.Day >= ViewFrom.Date && key.Day <= _historyTo.Date) continue;
             _dayCache.Remove(key);
         }
     }
@@ -421,6 +429,9 @@ public partial class MainWindow
     private string SortKey() => ListMetric switch { "mem" => "ram", "gpu" => "gpu", _ => "cpu" };
 
     private string? _historyApp; // null = the whole PC; otherwise the chart plots this one app
+    private bool _compare;       // also draw the stretch just before the range, as long as it, dashed
+    private List<SysSample> _before = new();
+    private DateTime ViewFrom => _compare ? _historyFrom - (_historyTo - _historyFrom) : _historyFrom; // the days the view needs
     private double _scale = 100;  // what the chart's full height stands for, in the metric's own unit
 
     /// <summary>Percent metrics fill a fixed 0-100 %; disk, network and an app's memory scale to what's on screen.</summary>
@@ -502,7 +513,10 @@ public partial class MainWindow
         double Y(double v) => bottom - Math.Clamp(v, 0, 100) / 100 * plotH;
 
         var samples = _historyApp == null ? _hist.System : AppSeries(_historyApp);
-        _scale = InPercent ? 100 : NiceCeiling(samples.Select(x => Raw(x, _historyMetric)).Where(v => !float.IsNaN(v)).DefaultIfEmpty(0).Max());
+        var shift = _historyTo - _historyFrom;
+        var before = _compare && _historyApp == null ? _before.Select(s => s with { Time = s.Time + shift }).ToList() : null;
+        _scale = InPercent ? 100 : NiceCeiling(samples.Concat(before ?? new()).Select(x => Raw(x, _historyMetric)).Where(v => !float.IsNaN(v)).DefaultIfEmpty(0).Max());
+        UpdateCompareText();
         if (_historyMetric == "fps")
         {
             _scale = Math.Max(30, _scale); // an idle scale of "1 FPS" says nothing
@@ -569,6 +583,19 @@ public partial class MainWindow
         };
         linePath.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" or "net" => "LineGlowMem", "gpu" or "fps" => "LineGlowGpu", _ => "LineGlowCpu" });
         c.Children.Add(areaPath);
+        if (before != null)
+        {
+            // The stretch before, laid over this one: a quiet dashed line under the real one.
+            var beforePeaks = Bucket(before, Metric, cols);
+            BridgeShortGaps(beforePeaks, bridge);
+            var beforePath = new Path
+            {
+                Data = SmoothRuns(beforePeaks, cols, Y, baseline: null), StrokeThickness = 1.5, StrokeDashArray = new DoubleCollection { 3, 2 },
+                Opacity = 0.75, StrokeLineJoin = PenLineJoin.Round, IsHitTestVisible = false,
+            };
+            beforePath.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
+            c.Children.Add(beforePath);
+        }
         c.Children.Add(linePath);
         (_chartPeaks, _chartWidth, _chartY, _chartCols) = (peaks, w, Y, cols);
         // The newest reading on screen gets a glowing dot, like the live graphs: where the line ends, it's "now".
@@ -1444,6 +1471,43 @@ public partial class MainWindow
         if (sender is RadioButton { Tag: string hours }) _historyHours = double.Parse(hours);
         if (IsLoaded) _ = LoadHistory();
     }
+
+    private void HistoryCompare_Click(object sender, RoutedEventArgs e)
+    {
+        _compare = HistoryCompareToggle.IsChecked == true;
+        _animateChart = true;
+        if (IsLoaded) _ = LoadHistory();
+    }
+
+    /// <summary>The range against the one just before it: average and peak of the metric, and the change.</summary>
+    private void UpdateCompareText()
+    {
+        CompareText.Visibility = _compare ? Visibility.Visible : Visibility.Collapsed;
+        if (!_compare) return;
+        if (_historyApp != null) { CompareText.Text = "Compare works on the whole PC — go back to it to see the dashed line."; return; }
+        (double Avg, double Peak)? Stats(List<SysSample> list)
+        {
+            var values = list.Select(s => (double)Raw(s, _historyMetric)).Where(v => !double.IsNaN(v)).ToList();
+            return values.Count == 0 ? null : (values.Average(), values.Max());
+        }
+        var span = _historyTo - _historyFrom;
+        string before = span.TotalHours < 48 ? $"the {span.TotalHours:0.#} h before" : $"the {span.TotalDays:0.#} days before";
+        string Change(double now, double then) => InPercent
+            ? (Math.Abs(now - then) < 0.05 ? "the same" : $"{now - then:+0.#;-0.#} point{(Math.Abs(Math.Round(now - then, 1)) == 1 ? "" : "s")}")
+            : then <= 0 ? (now <= 0 ? "the same" : "up from nothing") : Math.Abs(now / then - 1) < 0.005 ? "the same" : $"{(now / then - 1) * 100:+0;-0}%";
+        CompareText.Text = (Stats(_hist.System), Stats(_before)) switch
+        {
+            (null, _) => "Nothing recorded in this range to compare.",
+            (_, null) => $"Nothing recorded in {before} to compare with.",
+            ({ } n, { } b) => $"{MetricWord()} averaged {FormatValue(n.Avg)}, peak {FormatValue(n.Peak)} — {before} (dashed): {FormatValue(b.Avg)}, peak {FormatValue(b.Peak)}."
+                              + $" Average {Change(n.Avg, b.Avg)}, peak {Change(n.Peak, b.Peak)}." + (_historyMinutely ? " From minute peaks." : ""),
+        };
+    }
+
+    private string MetricWord() => _historyMetric switch
+    {
+        "mem" => "Memory", "gpu" => "GPU", "fps" => "FPS", "disk" => "Disk", "net" => "Network", "power" => "Power", "fan" => "The fans", "battery" => "Battery", _ => "CPU",
+    };
 
     private void HistoryMetric_Checked(object sender, RoutedEventArgs e)
     {
