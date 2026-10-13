@@ -64,8 +64,10 @@ public static class AppIdentity
         if (result == 0) return SignatureState.Signed;
         // Windows' own exes carry no signature of their own: they're listed, by hash, in a signed system
         // catalog. Checking only the embedded one would call svchost "unsigned".
+        // Store apps are signed as a package (AppxSignature.p7x), not file by file, and only Windows can write
+        // to the folder they're installed in.
         if (result is TRUST_E_NOSIGNATURE or TRUST_E_SUBJECT_FORM_UNKNOWN or TRUST_E_PROVIDER_UNKNOWN)
-            return InSystemCatalog(path) ? SignatureState.Signed : SignatureState.Unsigned;
+            return InSystemCatalog(path) || InStoreFolder(path) ? SignatureState.Signed : SignatureState.Unsigned;
         return SignatureState.Untrusted; // signed, but the signature is broken, revoked or from an untrusted root
     }
 
@@ -104,6 +106,12 @@ public static class AppIdentity
     /// ponytail: being listed is taken as signed — the catalog's own signature isn't re-verified here,
     /// since only an admin can add catalogs. Verify it with WTD_CHOICE_CATALOG if that ever matters.
     /// </summary>
+    private static bool InStoreFolder(string path)
+    {
+        string store = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps") + "\\";
+        return Path.GetFullPath(path).StartsWith(store, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool InSystemCatalog(string path)
     {
         try

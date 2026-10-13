@@ -119,7 +119,7 @@ public partial class MainWindow
     };
 
     private int _alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes, _alertAppMem, _alertDisk, _alertBattery;
-    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn;
+    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn, _alertCoolingOn;
     private bool _alertSettingsLoading;
 
     private void LoadAlertSettings()
@@ -133,6 +133,7 @@ public partial class MainWindow
                 check.IsChecked = key?.GetValue(CheckName(check)) is int on ? on == 1 : true; // all on until switched off
             }
             AlertUnsignedCheck.IsChecked = key?.GetValue(CheckName(AlertUnsignedCheck)) is int u ? u == 1 : true;
+            AlertCoolingCheck.IsChecked = key?.GetValue(CheckName(AlertCoolingCheck)) is int c ? c == 1 : true;
         }
         _alertSettingsLoading = false;
         ApplyAlertSettings(save: false);
@@ -161,6 +162,8 @@ public partial class MainWindow
             key?.SetValue(CheckName(check), check.IsChecked == true ? 1 : 0, RegistryValueKind.DWord);
         }
         key?.SetValue(CheckName(AlertUnsignedCheck), AlertUnsignedCheck.IsChecked == true ? 1 : 0, RegistryValueKind.DWord);
+        key?.SetValue(CheckName(AlertCoolingCheck), AlertCoolingCheck.IsChecked == true ? 1 : 0, RegistryValueKind.DWord);
+        _alertCoolingOn = AlertCoolingCheck.IsChecked == true;
 
         (_alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes) =
             (values["CpuTemp"], values["GpuTemp"], values["Memory"], values["AppCpu"], values["AppMinutes"]);
@@ -267,14 +270,31 @@ public partial class MainWindow
         {
             if (!_remoteAlertPolling.Add(pc.Name)) continue; // still waiting on the last answer
             var state = _remoteAlerts.TryGetValue(pc.Name, out var s) ? s : _remoteAlerts[pc.Name] = new AlertState();
-            Task.Run(() => JsonSerializer.Deserialize<ResourceSnapshot>(pc.Live(), LiveJson)).ContinueWith(t =>
+            bool askIdentity = DateTime.UtcNow - pc.IdentityAt > TimeSpan.FromMinutes(10);
+            Task.Run(() =>
+            {
+                var snap = JsonSerializer.Deserialize<ResourceSnapshot>(pc.Live(), LiveJson);
+                return (Snap: snap, Identity: askIdentity ? pc.Identity() : ((string, string[])?)null);
+            }).ContinueWith(t =>
             {
                 _remoteAlertPolling.Remove(pc.Name);
                 if (!_remotes.Contains(pc)) return; // removed meanwhile
                 var card = _pcCards.FirstOrDefault(c => c.Name == pc.Name);
                 bool alerts = RemoteAlertsOn(pc.Name);
-                if (t.IsCompletedSuccessfully && t.Result is { } snap)
+                if (t.IsCompletedSuccessfully && t.Result.Snap is { } snap)
                 {
+                    if (t.Result.Identity is (var version, var macs))
+                    {
+                        pc.IdentityAt = DateTime.UtcNow;
+                        pc.Version = version;
+                        if (card != null) card.Version = version.Length > 0 ? $"v{version}" : "older than 1.9";
+                        if (macs.Length > 0 && !macs.SequenceEqual(pc.Macs)) // remembered, to wake it once it's off
+                        {
+                            pc.Macs = macs;
+                            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RemotePcsKey);
+                            key.SetValue(pc.Name, pc.Saved);
+                        }
+                    }
                     if (card != null) (card.Online, card.Status) = (true, CardStatus(snap));
                     if (state.OfflineAlerted && alerts) Alert($"{pc.Name}:online", $"{pc.Name} is answering again");
                     (state.OfflineSince, state.OfflineAlerted) = (null, false);
@@ -327,6 +347,7 @@ public partial class MainWindow
         var now = DateTime.UtcNow;
         if (_alertedAt.TryGetValue(key, out var last) && now - last < AlertCooldown) return;
         _alertedAt[key] = now;
+        _balloonOpens = null; // a click on this balloon opens the window, not an earlier report
         Log($"Alert: {text}");
         try { HistoryStore.WriteEvent("alert", text); }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { } // the log line above still has it

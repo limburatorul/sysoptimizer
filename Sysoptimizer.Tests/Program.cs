@@ -21,7 +21,9 @@ void Check(bool ok, string what)
 }
 static long Unix(DateTime t) => new DateTimeOffset(t).ToUnixTimeSeconds();
 
-string folder = Path.Combine(Path.GetTempPath(), "sysoptimizer-selftest-" + Environment.ProcessId);
+foreach (var old in Directory.GetDirectories(Path.GetTempPath(), "sysoptimizer-selftest-*")) // earlier runs can't delete their own (today's file is open)
+    try { Directory.Delete(old, recursive: true); } catch (IOException) { } // another run still has it
+string folder = Path.Combine(Path.GetTempPath(), "sysoptimizer-selftest-" + Guid.NewGuid().ToString("N")); // never a leftover from an earlier run
 Directory.CreateDirectory(folder);
 HistoryStore.Folder = folder;
 HistoryStore.RetentionDays = 30;
@@ -123,14 +125,26 @@ try
     Check(Throws(() => RemoteCrypto.Open(key, "other req", sealedBytes)), "remote: an answer to another request is rejected");
     Check(Throws(() => RemoteCrypto.Open(otherKey, "req", sealedBytes)), "remote: the wrong key can't open an answer");
 
-    static int FreePort() { var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); probe.Start(); int p = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; probe.Stop(); return p; }
+    // Free for TCP (the server) and UDP (its discovery) alike: another app's UDP socket on the same number makes discovery miss.
+    static int FreePort()
+    {
+        while (true)
+        {
+            var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            probe.Start();
+            int p = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            try { using (new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Any, p))) return p; }
+            catch (System.Net.Sockets.SocketException) { }
+        }
+    }
     int port = FreePort(), passwordPort = FreePort();
     var commands = new List<RemoteCommand>();
     string FakeRun(RemoteCommand c) { lock (commands) commands.Add(c); return "ok\ndone"; }
     var salt = RemoteCrypto.NewSalt();
     DateTime energyFrom = default, energyTo = default;
     using (new HistoryServer(port, key, salt, () => "{\"CpuPercent\":42}"u8.ToArray(), () => "[{\"Name\":\"app\"}]"u8.ToArray(),
-        (from, to) => { (energyFrom, energyTo) = (from, to); return "chrome\t1.5"; }, FakeRun, "localhost"))
+        (from, to) => { (energyFrom, energyTo) = (from, to); return "chrome\t1.5"; }, FakeRun, name => name == "startup" ? "[\"startup list\"]"u8.ToArray() : null, "localhost"))
     {
         var client = new RemoteHistory("test", "localhost", port, key);
         Check(client.Hello() == Environment.MachineName, "remote: the server says who it is");
@@ -139,7 +153,7 @@ try
         var at = new DateTime(2026, 10, 12, 8, 0, 0, DateTimeKind.Utc);
         Check(client.Energy(at, at.AddHours(1)) == "chrome\t1.5" && energyFrom == at && energyTo == at.AddHours(1), "remote: energy figures for the asked range");
         var first = client.ReadDay(DateTime.Today, minutes: false);
-        Check(first.System.Count == 1 && first.Events.Count == 1, "remote: today's lines arrive");
+        Check(first.System.Count == 1 && first.Events.Count == 1, $"remote: today's lines arrive ({first.System.Count} S, {first.Events.Count} E)");
         // More of today, including a launch stamped earlier than the newest line (written ~10 s late).
         var later = DateTime.UtcNow.AddSeconds(2);
         HistoryStore.Write(new SysSample(later, 50, 41, 8, 66, 46, 1, 1));
@@ -191,9 +205,49 @@ try
         var (once, again) = (Post(), Post());
         Check(once == System.Net.HttpStatusCode.OK && again == System.Net.HttpStatusCode.BadRequest && commands.Count == before + 1, $"command: a replayed request doesn't run again ({once}, {again}, {commands.Count - before})");
 
+        // Lists and identity (1.9): the startup/services/boots lists, the version, and the MACs for waking it.
+        Check(client.List("startup") == "[\"startup list\"]", "lists: an app list arrives by name");
+        try { client.List("../secret"); Check(false, "lists: unknown names refused"); }
+        catch (RemoteHistoryException) { Check(true, "lists: unknown names refused"); }
+        var (version, macs) = client.Identity();
+        Check(version.Length > 0 && macs.All(WakeOnLan.IsMac), "identity: version and wake-up addresses");
+        foreach (var (what, target) in new[] { ("update-app", (string?)null), ("startup-disable", "Spotify"), ("service-enable", "SysMain") }) client.Run(what, target);
+        Check(commands.Skip(commands.Count - 3).Select(c => (c.Action, c.Target)).SequenceEqual(new[] { ("update-app", (string?)null), ("startup-disable", "Spotify"), ("service-enable", "SysMain") }),
+            "command: update the app, a startup entry, a service");
+        int beforeBad = commands.Count;
+        try { client.Run("service-disable", "bad\nname"); } catch (RemoteHistoryException) { }
+        try { client.Run("update-app", "now"); } catch (RemoteHistoryException) { }
+        Check(commands.Count == beforeBad, "command: control characters and stray targets refused");
+
         // Discovery: the probe on the sharing port is answered with the PC's name.
         var found = RemoteDiscovery.Find(port, TimeSpan.FromSeconds(1), System.Net.IPAddress.Loopback).GetAwaiter().GetResult();
         Check(found.Count == 1 && found[0].Name == Environment.MachineName && found[0].Address == "127.0.0.1", "discovery: a sharing PC answers with its name");
+    }
+
+    // 8. Wake-on-LAN's packet, and the phone page: its password, its lockout.
+    var magic = WakeOnLan.MagicPacket("001122AABBCC");
+    Check(magic.Length == 102 && magic.Take(6).All(b => b == 0xFF) && magic[6] == 0x00 && magic[11] == 0xCC && magic[^1] == 0xCC && magic[^6] == 0x00, "wake: 6 × FF, then the MAC 16 times");
+    Check(!WakeOnLan.IsMac("00112233445") && !WakeOnLan.IsMac("00112233445G") && WakeOnLan.IsMac("00112233445f"), "wake: MACs are 12 hex digits");
+    int phonePort = FreePort();
+    var phoneSalt = RemoteCrypto.NewSalt();
+    using (new PhoneServer(phonePort, RemoteCrypto.FromPassword("phone pass", phoneSalt), phoneSalt, () => "[{\"name\":\"pc\"}]"u8.ToArray(), "localhost"))
+    {
+        using var browser = new System.Net.Http.HttpClient();
+        System.Net.Http.HttpResponseMessage Ask(string path, string? password)
+        {
+            var m = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, $"http://localhost:{phonePort}{path}");
+            if (password != null) m.Headers.Authorization = new("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("me:" + password)));
+            return browser.Send(m);
+        }
+        var anonymous = Ask("/", null);
+        Check(anonymous.StatusCode == System.Net.HttpStatusCode.Unauthorized && anonymous.Headers.WwwAuthenticate.ToString().Contains("Basic"), "phone: asks for the password");
+        Check(Ask("/", "wrong").StatusCode == System.Net.HttpStatusCode.Unauthorized, "phone: a wrong password is refused");
+        var page = Ask("/", "phone pass");
+        Check(page.IsSuccessStatusCode && page.Content.ReadAsStringAsync().Result.Contains("Sysoptimizer"), "phone: the right password opens the page");
+        Check(Ask("/api/pcs", "phone pass").Content.ReadAsStringAsync().Result == "[{\"name\":\"pc\"}]", "phone: the cards arrive");
+        for (int i = 0; i < 9; i++) Ask("/", "guess " + i);
+        Check(Ask("/", "another guess").StatusCode == (System.Net.HttpStatusCode)429, "phone: 10 wrong passwords lock it for a while");
+        Check(Ask("/", "phone pass").StatusCode == System.Net.HttpStatusCode.OK, "phone: a browser already in stays in");
     }
 
     // 7. Windows' energy table and winget's search table, as the real tools print them.

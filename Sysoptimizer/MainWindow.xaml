@@ -75,7 +75,7 @@
                                                     </StackPanel>
                                                     <StackPanel>
                                                         <TextBlock>
-                                                            <Run x:Name="Dot" Text="● " Foreground="{DynamicResource StatusBad}" /><Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
+                                                            <Run x:Name="Dot" Text="● " Foreground="{DynamicResource StatusBad}" /><Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding Version, Mode=OneWay}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                                         </TextBlock>
                                                         <TextBlock Text="{Binding Status}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
                                                     </StackPanel>
@@ -306,6 +306,8 @@
                                                     <TextBlock Text="% unplugged" />
                                                 </StackPanel>
                                                 <CheckBox x:Name="AlertUnsignedCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="An unsigned app starts" />
+                                                <CheckBox x:Name="AlertCoolingCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="Cooling got worse"
+                                                          ToolTip="Once a day: if the CPU or GPU runs 7 °C or more hotter than a month ago at the same light load — dust, or a slowing fan" />
                                             </WrapPanel>
                                         </StackPanel>
                                     </Border>
@@ -377,6 +379,8 @@
                                         <ComboBoxItem Content="30 days" Tag="720" />
                                         <ComboBoxItem Content="Everything" Tag="0" />
                                     </ComboBox>
+                                    <Button DockPanel.Dock="Right" Content="Report" Margin="8,0,0,0" VerticalAlignment="Center" Click="Report_Click"
+                                            ToolTip="The last 7 days of this PC and every watched one, as a page in your browser (also made on its own every Monday)" />
                                     <Button DockPanel.Dock="Right" Content="Export…" Margin="8,0,0,0" VerticalAlignment="Center" Click="ExportHistory_Click" ToolTip="Save what the chart shows as CSV files (Excel opens them)" />
                                     <ComboBox x:Name="RetentionCombo" DockPanel.Dock="Right" Width="190" VerticalAlignment="Center" SelectionChanged="Retention_Changed" AutomationProperties.Name="Keep history for"
                                               ToolTip="How long the history is kept. About 1.5 MB per day, packed; days past the limit are removed at midnight.">
@@ -485,6 +489,7 @@
                             <RadioButton Content="Debloat" GroupName="OptimizePages" Tag="{Binding ElementName=DebloatPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                             <RadioButton Content="Uninstall" GroupName="OptimizePages" Tag="{Binding ElementName=UninstallPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                             <RadioButton Content="Install" GroupName="OptimizePages" Tag="{Binding ElementName=InstallPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
+                            <RadioButton Content="Schedule" GroupName="OptimizePages" Tag="{Binding ElementName=SchedulePage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" />
                         </StackPanel>
                         <Grid>
                             <Border x:Name="CleanupPage">
@@ -548,6 +553,21 @@
                             </Border>
                             <Border x:Name="StartupPage" Visibility="Collapsed">
                                 <DockPanel Margin="16">
+                                    <Border DockPanel.Dock="Top" Padding="14,10" Margin="0,0,0,12" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock x:Name="BootsSummary" Text="Reading Windows' starts…" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                            <ItemsControl x:Name="BootsList" Margin="0,6,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,3">
+                                                            <TextBlock Text="{Binding Name}" FontSize="12" />
+                                                            <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
                                         <Button Content="Enable selected" Click="EnableStartup_Click" Margin="0,0,8,0" />
                                         <Button Content="Disable selected" Style="{StaticResource PrimaryButton}" Click="DisableStartup_Click" />
@@ -666,6 +686,40 @@
                                                                     <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                                                 </StackPanel>
                                                             </CheckBox>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                            <Border x:Name="SchedulePage" Visibility="Collapsed">
+                                <DockPanel Margin="16">
+                                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" FontSize="12" Margin="0,0,0,10"
+                                               Text="Run things on their own — on this PC or a watched one. Each runs once on its day, within 10 minutes of its time; a PC that's off then skips it (or schedule a Wake up a few minutes before)." />
+                                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                        <ComboBox x:Name="ScheduleActionCombo" Width="200" Margin="0,0,8,6" AutomationProperties.Name="What to do" />
+                                        <TextBlock Text="on" VerticalAlignment="Center" Margin="0,0,8,6" />
+                                        <ComboBox x:Name="SchedulePcCombo" Width="150" Margin="0,0,8,6" AutomationProperties.Name="Which PC" />
+                                        <ComboBox x:Name="ScheduleDaysCombo" Width="170" Margin="0,0,8,6" AutomationProperties.Name="Which days" />
+                                        <TextBlock Text="at" VerticalAlignment="Center" Margin="0,0,8,6" />
+                                        <TextBox x:Name="ScheduleTimeBox" Width="70" Text="3:00" VerticalContentAlignment="Center" Margin="0,0,8,6" AutomationProperties.Name="Time, hours and minutes" />
+                                        <Button Content="Add" Style="{StaticResource PrimaryButton}" Click="ScheduleAdd_Click" Margin="0,0,0,6" />
+                                    </WrapPanel>
+                                    <TextBlock x:Name="ScheduleStatus" DockPanel.Dock="Top" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,0,0,8" />
+                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
+                                        <ItemsControl x:Name="ScheduleList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="0,8">
+                                                        <DockPanel>
+                                                            <Button DockPanel.Dock="Right" Content="Remove" Tag="{Binding Tag}" Click="ScheduleRemove_Click" AutomationProperties.Name="{Binding Name, StringFormat=Remove {0}}" />
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Note}" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
+                                                            </StackPanel>
                                                         </DockPanel>
                                                     </Border>
                                                 </DataTemplate>
@@ -921,6 +975,23 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                            <Border Padding="18,14" Margin="0,12,0,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Text="Phone page" FontWeight="SemiBold" />
+                                    <TextBlock Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,8"
+                                               Text="The PCs' cards in a phone's browser, on this network: readings only, no actions. Give it its own password — the page is plain HTTP, so the network can see it — never the one for remote monitoring." />
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox x:Name="PhoneCheck" Content="Allow, on port" VerticalAlignment="Center" Click="Phone_Click" />
+                                        <TextBox x:Name="PhonePortBox" Width="76" Margin="8,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Phone page port" />
+                                    </StackPanel>
+                                    <DockPanel Margin="0,8,0,0">
+                                        <Button DockPanel.Dock="Right" Content="Set password" Click="PhonePassword_Click" Margin="6,0,0,0" />
+                                        <TextBlock DockPanel.Dock="Left" Text="Page password" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource TextSecondary}" />
+                                        <PasswordBox x:Name="PhonePasswordBox" VerticalAlignment="Center" AutomationProperties.Name="Phone page password" />
+                                    </DockPanel>
+                                    <TextBlock x:Name="PhoneStatus" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

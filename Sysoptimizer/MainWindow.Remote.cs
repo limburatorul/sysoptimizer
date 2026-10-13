@@ -50,9 +50,12 @@ public partial class MainWindow
 
         using (var key = Registry.CurrentUser.OpenSubKey(RemotePcsKey))
             foreach (var name in key?.GetValueNames() ?? Array.Empty<string>())
-                if (key!.GetValue(name) is string data && data.Split('|') is [var address, var portText, var keyText]
+                if (key!.GetValue(name) is string data && data.Split('|') is [var address, var portText, var keyText, .. var rest]
                     && int.TryParse(portText, out int port) && RemoteCrypto.ParseKey(keyText) is { } secret)
-                    _remotes.Add(new RemoteHistory(name, address, port, secret));
+                    _remotes.Add(new RemoteHistory(name, address, port, secret)
+                    {
+                        Macs = rest.FirstOrDefault()?.Split(',').Where(WakeOnLan.IsMac).ToArray() ?? Array.Empty<string>(),
+                    });
         WatchedPcsList.ItemsSource = _pcCards;
         // The PC picked last time stays picked: watching another PC is usually what this one is set up for.
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
@@ -85,7 +88,7 @@ public partial class MainWindow
         {
             _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, Salt(), () => _liveJson,
                 () => JsonSerializer.SerializeToUtf8Bytes(_lastProcesses.Select(p => p with { Path = null }), LiveJson), // a path means nothing on the watching PC
-                EnergyLines, RunRemoteCommand);
+                EnergyLines, command => RunCommand(command, scheduled: false), RemoteList);
         }
         catch (HttpListenerException ex)
         {
@@ -180,11 +183,28 @@ public partial class MainWindow
         catch (IOException ex) { return "!" + ex.Message; }
     }
 
-    /// <summary>Runs on the server's thread: announced here first (tray, log, Events), then done and reported back.</summary>
-    private string RunRemoteCommand(RemoteCommand command)
+    /// <summary>/startup, /services and /boots: the lists the Optimize tab shows, as this PC has them.</summary>
+    private static byte[]? RemoteList(string name) => name switch
+    {
+        "startup" => JsonSerializer.SerializeToUtf8Bytes(StartupService.GetItems()),
+        "services" => JsonSerializer.SerializeToUtf8Bytes(ServiceManager.KnownServices.ToDictionary(s => s.Key, s => ServiceManager.GetStatus(s.Key))),
+        "boots" => JsonSerializer.SerializeToUtf8Bytes(BootService.Read()),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Runs on a background thread — asked by a watching PC, or due in the schedule: announced here first
+    /// (tray, log, Events), then done and reported back.
+    /// </summary>
+    private string RunCommand(RemoteCommand command, bool scheduled)
     {
         string what = command.Action switch
         {
+            "update-app" => "updating Sysoptimizer",
+            "startup-enable" => $"letting {command.Target} start with Windows",
+            "startup-disable" => $"stopping {command.Target} from starting with Windows",
+            "service-enable" => $"re-enabling the {command.Target} service",
+            "service-disable" => $"stopping and disabling the {command.Target} service",
             "install-winget" or "install-file" => $"installing {command.Target}",
             "install-url" => $"installing from {command.Target}",
             "upgrade-all" => "updating every app",
@@ -193,7 +213,7 @@ public partial class MainWindow
             "restart" => "restarting this PC in 1 minute",
             _ => "shutting this PC down in 1 minute",
         };
-        Dispatcher.Invoke(() => Alert($"remote:{Guid.NewGuid()}", $"A watching PC is {what} here"));
+        Dispatcher.Invoke(() => Alert($"remote:{Guid.NewGuid()}", scheduled ? $"Scheduled: {what}" : $"A watching PC is {what} here"));
         string output;
         bool ok = command.Action switch
         {
@@ -203,9 +223,12 @@ public partial class MainWindow
             "upgrade-all" => WingetService.UpgradeAll(out output),
             "kill" => EndApp(command.Target!, out output),
             "cleanup" => CleanAll(out output),
+            "update-app" => UpdateSelf(out output),
+            "startup-enable" or "startup-disable" => SetStartup(command.Target!, enable: command.Action == "startup-enable", out output),
+            "service-enable" or "service-disable" => SetService(command.Target!, enable: command.Action == "service-enable", out output),
             _ => ShutDown(restart: command.Action == "restart", out output),
         };
-        Dispatcher.Invoke(() => Log($"Remote request ({what}): {(ok ? "done" : "failed")} — {LastLine(output)}"));
+        Dispatcher.Invoke(() => Log($"{(scheduled ? "Scheduled" : "Remote request")} ({what}): {(ok ? "done" : "failed")} — {LastLine(output)}"));
         return $"{(ok ? "ok" : "failed")}\n{output}";
     }
 
@@ -289,6 +312,39 @@ public partial class MainWindow
         return ended > 0;
     }
 
+    /// <summary>The newest release from GitHub, checked like the updater checks it; the app restarts into it.</summary>
+    private bool UpdateSelf(out string output)
+    {
+        var latest = Updater.Latest().GetAwaiter().GetResult();
+        if (latest == null) { output = "couldn't reach GitHub for the latest version"; return false; }
+        if (latest.Version <= Updater.Current) { output = $"already up to date ({Updater.Current})"; return true; }
+        string installer;
+        try { installer = Updater.Download(latest, null, CancellationToken.None).GetAwaiter().GetResult(); }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or TaskCanceledException) { output = $"the download failed — {ex.Message}"; return false; }
+        Updater.InstallAndRestart(installer);
+        // Leave a few seconds for the answer to get out, then make way for the installer.
+        Dispatcher.InvokeAsync(async () => { await Task.Delay(3000); ExitApp(); });
+        output = $"updating {Updater.Current} → {latest.Version}; it restarts in about a minute";
+        return true;
+    }
+
+    private static bool SetStartup(string name, bool enable, out string output)
+    {
+        var item = StartupService.GetItems().FirstOrDefault(i => i.Name == name && (i.Location == "Disabled") == enable);
+        if (item == null) { output = $"{name} isn't {(enable ? "a disabled" : "an enabled")} startup entry there"; return false; }
+        if (enable) StartupService.Enable(item); else StartupService.Disable(item);
+        output = enable ? $"{name} starts with Windows again" : $"{name} no longer starts with Windows";
+        return true;
+    }
+
+    private static bool SetService(string key, bool enable, out string output)
+    {
+        if (!ServiceManager.KnownServices.Any(s => s.Key == key)) { output = $"{key} isn't one of the services Sysoptimizer manages"; return false; }
+        if (enable) ServiceManager.EnableAndStart(key); else ServiceManager.StopAndDisable(key);
+        output = $"{key}: {ServiceManager.GetStatus(key)}";
+        return true;
+    }
+
     private static bool CleanAll(out string output)
     {
         long freed = 0;
@@ -368,7 +424,12 @@ public partial class MainWindow
         }
         Add("Update all apps", "upgrade-all");
         Add("Clean up temporary files", "cleanup");
+        Add("Update Sysoptimizer", "update-app");
         menu.Items.Add(new Separator());
+        var wake = new MenuItem { Header = "Wake up", IsEnabled = target.Macs.Length > 0,
+            ToolTip = target.Macs.Length > 0 ? "Sends a Wake-on-LAN packet (it must be allowed in that PC's BIOS)" : "Its network address is learned once it answers with Sysoptimizer 1.9 or newer" };
+        wake.Click += async (_, _) => await Wake(target);
+        menu.Items.Add(wake);
         Add("Restart…", "restart", $"Restart {target.Name}? Whoever is using it gets a minute's notice to save their work.");
         Add("Shut down…", "shutdown", $"Shut {target.Name} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
         menu.IsOpen = true;
@@ -433,7 +494,7 @@ public partial class MainWindow
             _remotes.RemoveAll(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
             _remotes.Add(new RemoteHistory(name, address, port, secret));
             using (var key = Registry.CurrentUser.CreateSubKey(RemotePcsKey))
-                key.SetValue(name, $"{address}|{port}|{RemoteCrypto.Base64Url(secret)}");
+                key.SetValue(name, _remotes[^1].Saved);
             RemoteAddKeyBox.Clear();
             RemoteFoundList.ItemsSource = null;
             RemoteAddStatus.Text = $"Added {name}. Pick it under Showing, in the bar at the bottom, or on its card in Resources.";
@@ -458,6 +519,7 @@ public partial class MainWindow
         foreach (var gone in _pcCards.Where(c => !_remotes.Any(r => r.Name == c.Name)).ToList()) _pcCards.Remove(gone);
         foreach (var r in _remotes.Where(r => !_pcCards.Any(c => c.Name == r.Name))) _pcCards.Add(new PcCard { Name = r.Name });
         WatchedPcsPanel.Visibility = _pcCards.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (IsLoaded) RefreshSchedule();
         string? selected = select ?? _source?.Name;
         HistorySourceCombo.Items.Clear();
         HistorySourceCombo.Items.Add(new ComboBoxItem { Content = "This PC" });
@@ -501,6 +563,8 @@ public partial class MainWindow
         _ = LoadHistory();
         if (EventsList.IsVisible) _ = LoadEvents();
         if (ProcessesList.IsVisible && source == null) UpdateProcessRows();
+        if (StartupList.IsVisible) _ = LoadStartup();
+        if (ServicesList.IsVisible) _ = LoadServices();
     }
 }
 
@@ -510,6 +574,8 @@ public sealed class PcCard : INotifyPropertyChanged
     public required string Name { get; init; }
     private string _status = "Connecting…";
     private bool _online, _shown;
+    private string _version = "";
+    public string Version { get => _version; set { _version = value; Raise(nameof(Version)); } }
     public string Status { get => _status; set { _status = value; Raise(nameof(Status)); } }
     public bool Online { get => _online; set { _online = value; Raise(nameof(Online)); } }
     public bool Shown { get => _shown; set { _shown = value; Raise(nameof(Shown)); } }

@@ -15,6 +15,7 @@
     <Compile Include="..\Sysoptimizer\Services\RemoteHistory.cs" Link="RemoteHistory.cs" />
     <Compile Include="..\Sysoptimizer\Services\EnergyService.cs" Link="EnergyService.cs" />
     <Compile Include="..\Sysoptimizer\Services\WingetService.cs" Link="WingetService.cs" />
+    <Compile Include="..\Sysoptimizer\Services\PhoneServer.cs" Link="PhoneServer.cs" />
   </ItemGroup>
 
 </Project>

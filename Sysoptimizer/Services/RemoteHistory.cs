@@ -120,6 +120,9 @@ public sealed record RemoteCommand(string Action, string? Target, byte[]? File, 
     public static bool IsProcessName(string? name) =>
         name is { Length: > 0 and <= 128 } && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
 
+    /// <summary>A startup entry's or a service's name: looked up among the PC's own, never used as a path.</summary>
+    public static bool IsName(string? name) => name is { Length: > 0 and <= 256 } && !name.Any(char.IsControl);
+
     /// <summary>The command a request asks for, or null when it isn't one this PC accepts.</summary>
     public static RemoteCommand? From(string? action, string? target, string? args, byte[]? file)
     {
@@ -131,7 +134,8 @@ public sealed record RemoteCommand(string Action, string? Target, byte[]? File, 
             "install-file" when SafeFileName(target) != null && file != null => new(action, target, file, args),
             "install-url" when IsHttpsLink(target) && file == null => new(action, target, null, args),
             "kill" when IsProcessName(target) && file == null => new(action, target, null, ""),
-            "upgrade-all" or "cleanup" or "restart" or "shutdown" when target == null && file == null => new(action, null, null, ""),
+            "startup-enable" or "startup-disable" or "service-enable" or "service-disable" when IsName(target) && file == null => new(action, target, null, ""),
+            "upgrade-all" or "cleanup" or "restart" or "shutdown" or "update-app" when target == null && file == null => new(action, null, null, ""),
             _ => null,
         };
     }
@@ -151,6 +155,7 @@ public sealed class HistoryServer : IDisposable
     private readonly byte[]? _salt;
     private readonly Func<byte[]?>? _live, _processes;
     private readonly Func<DateTime, DateTime, string>? _energy;
+    private readonly Func<string, byte[]?>? _lists;
     private readonly Func<RemoteCommand, string>? _run;
     private readonly Dictionary<string, DateTime> _ran = new(); // commands already run, by signature
     private readonly object _runGate = new();                   // one at a time
@@ -160,11 +165,12 @@ public sealed class HistoryServer : IDisposable
     /// <param name="processes">The running apps (the Processes tab's list), serialized.</param>
     /// <param name="energy">Windows' energy figures per app between two UTC times, one "app\tWh" line each.</param>
     /// <param name="run">Runs a command and returns its outcome ("ok"/"failed" line, then details).</param>
+    /// <param name="lists">Any other list the app keeps, by endpoint name (startup, services, boots), serialized; null = none.</param>
     /// <param name="host">"+" = every address (needs admin — the app always runs elevated); the self-test uses localhost.</param>
     public HistoryServer(int port, byte[] key, byte[]? salt = null, Func<byte[]?>? live = null, Func<byte[]?>? processes = null,
-        Func<DateTime, DateTime, string>? energy = null, Func<RemoteCommand, string>? run = null, string host = "+")
+        Func<DateTime, DateTime, string>? energy = null, Func<RemoteCommand, string>? run = null, Func<string, byte[]?>? lists = null, string host = "+")
     {
-        (_key, _salt, _live, _processes, _energy, _run) = (key, salt, live, processes, energy, run);
+        (_key, _salt, _live, _processes, _energy, _run, _lists) = (key, salt, live, processes, energy, run, lists);
         _listener.Prefixes.Add($"http://{host}:{port}{Prefix}");
         _listener.Start();
         _ = Task.Run(Loop);
@@ -224,7 +230,7 @@ public sealed class HistoryServer : IDisposable
                 : endpoint.EndsWith("/live") ? _live?.Invoke()
                 : endpoint.EndsWith("/procs") ? _processes?.Invoke()
                 : endpoint.EndsWith("/energy") ? Energy(request.QueryString)
-                : Answer(endpoint, request.QueryString);
+                : Answer(endpoint, request.QueryString) ?? _lists?.Invoke(endpoint[(endpoint.LastIndexOf('/') + 1)..]);
             if (body == null) { response.StatusCode = 400; return; }
             var sealedBody = RemoteCrypto.Seal(_key, $"{path}\n{time}", body);
             response.ContentType = "application/octet-stream";
@@ -275,7 +281,8 @@ public sealed class HistoryServer : IDisposable
     private static byte[]? Answer(string path, System.Collections.Specialized.NameValueCollection query)
     {
         if (path.EndsWith("/info"))
-            return Encoding.UTF8.GetBytes($"{Environment.MachineName}\n{HistoryStore.OldestDay():yyyy-MM-dd}");
+            return Encoding.UTF8.GetBytes($"{Environment.MachineName}\n{HistoryStore.OldestDay():yyyy-MM-dd}\n"
+                + $"{System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3)}\n{string.Join(",", WakeOnLan.MacAddresses())}");
         if (!path.EndsWith("/day")
             || !DateTime.TryParseExact(query["date"], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
             || query["kind"] is not ("raw" or "min")
@@ -302,6 +309,42 @@ public sealed class HistoryServer : IDisposable
         _discovery?.Dispose();
         try { _listener.Stop(); } catch (ObjectDisposedException) { }
         _listener.Close();
+    }
+}
+
+/// <summary>
+/// Wakes a PC that's off or asleep: the "magic packet" (6 × FF, then its MAC 16 times) broadcast on UDP 9.
+/// Only if that PC's network card and BIOS allow it, and only on the same network.
+/// </summary>
+public static class WakeOnLan
+{
+    /// <summary>This PC's wired and wireless adapters' MACs, as 12 hex digits — what a watcher keeps to wake it.</summary>
+    public static IEnumerable<string> MacAddresses() =>
+        NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.GigabitEthernet)
+            .Select(n => n.GetPhysicalAddress().ToString())
+            .Where(m => m.Length == 12 && m != "000000000000").Distinct();
+
+    public static bool IsMac(string? mac) => mac is { Length: 12 } && mac.All(Uri.IsHexDigit);
+
+    public static byte[] MagicPacket(string mac)
+    {
+        byte[] address = Convert.FromHexString(mac), packet = new byte[6 + 16 * 6];
+        Array.Fill(packet, (byte)0xFF, 0, 6);
+        for (int i = 0; i < 16; i++) address.CopyTo(packet, 6 + i * 6);
+        return packet;
+    }
+
+    public static async Task Send(IEnumerable<string> macs)
+    {
+        using var udp = new UdpClient(0) { EnableBroadcast = true };
+        foreach (var mac in macs.Where(IsMac))
+        {
+            var packet = MagicPacket(mac);
+            foreach (var target in RemoteDiscovery.BroadcastAddresses())
+                try { await udp.SendAsync(packet, new IPEndPoint(target, 9)); }
+                catch (SocketException) { } // an adapter that can't send right now
+        }
     }
 }
 
@@ -335,7 +378,7 @@ public static class RemoteDiscovery
     }
 
     /// <summary>Every adapter's own broadcast address (Windows sends 255.255.255.255 out of one adapter only), plus that.</summary>
-    private static IEnumerable<IPAddress> BroadcastAddresses()
+    internal static IEnumerable<IPAddress> BroadcastAddresses()
     {
         yield return IPAddress.Broadcast;
         foreach (var nic in NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up))
@@ -370,6 +413,14 @@ public sealed class RemoteHistory
 
     public RemoteHistory(string name, string address, int port, byte[] key) => (Name, Address, Port, _key) = (name, address, port, key);
 
+    /// <summary>Learned from /info while it answers: its MACs (kept, to wake it once it's off) and its version.</summary>
+    public string[] Macs { get; set; } = Array.Empty<string>();
+    public string Version { get; set; } = "";
+    public DateTime IdentityAt { get; set; }
+
+    /// <summary>What's kept in the registry for it: address|port|key|MACs.</summary>
+    public string Saved => $"{Address}|{Port}|{RemoteCrypto.Base64Url(_key)}|{string.Join(",", Macs)}";
+
     /// <summary>The PC's latest full reading (what its own Resources tab shows), as JSON.</summary>
     public string Live() => Get("live");
 
@@ -399,6 +450,16 @@ public sealed class RemoteHistory
 
     /// <summary>Asks the PC who it is — the check made before a PC is added.</summary>
     public string Hello() => Get("info").Split('\n')[0];
+
+    /// <summary>The Sysoptimizer version it runs ("" before 1.9) and its MACs (for waking it), from /info.</summary>
+    public (string Version, string[] Macs) Identity()
+    {
+        var lines = Get("info").Split('\n');
+        return (lines.ElementAtOrDefault(2) ?? "", (lines.ElementAtOrDefault(3) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Where(WakeOnLan.IsMac).ToArray());
+    }
+
+    /// <summary>One of the app's lists on that PC — "startup", "services" or "boots" — as JSON.</summary>
+    public string List(string name) => Get(name);
 
     public DateTime? OldestDay()
     {

@@ -96,6 +96,9 @@ public partial class MainWindow : Window
         TweaksList.ItemsSource = _tweakItems;
         AppsList.ItemsSource = _appItems;
         StartupList.ItemsSource = _startupItems;
+        // Both pages follow the PC being shown, and are read afresh each time they open.
+        StartupList.IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) _ = LoadStartup(); };
+        ServicesList.IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) _ = LoadServices(); };
         BloatwareList.ItemsSource = _bloatwareItems;
 
         foreach (var t in CleanupService.Targets)
@@ -271,6 +274,7 @@ public partial class MainWindow : Window
         });
 
         if (_server != null) _liveJson = JsonSerializer.SerializeToUtf8Bytes(snap, LiveJson);
+        _localSnap = snap;
         if (_source == null) ShowSnapshot(snap);
         else
         {
@@ -646,8 +650,36 @@ public partial class MainWindow : Window
 
     // --- Servicii ---
 
-    private void DisableServices_Click(object sender, RoutedEventArgs e)
+    /// <summary>The managed services' states, on this PC or the one being shown.</summary>
+    private async Task LoadServices()
     {
+        var source = _source;
+        Dictionary<string, string> statuses;
+        try
+        {
+            statuses = await Task.Run(() => source == null
+                ? ServiceManager.KnownServices.ToDictionary(s => s.Key, s => ServiceManager.GetStatus(s.Key))
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(source.List("services"), LiveJson) ?? new());
+        }
+        catch (Exception ex) when (ex is RemoteHistoryException or JsonException)
+        {
+            if (source == _source) Log($"Services on {source!.Name}: {ex.Message}.");
+            statuses = new();
+        }
+        if (source != _source) return;
+        foreach (var item in _serviceItems) item.Note = statuses.GetValueOrDefault((string)item.Tag!, "—");
+        ServicesList.Items.Refresh();
+    }
+
+    private async void DisableServices_Click(object sender, RoutedEventArgs e)
+    {
+        if (_source is { } target)
+        {
+            foreach (var item in _serviceItems.Where(i => i.IsChecked).ToList())
+                await RunOn(target, $"Stopping and disabling {item.Name}", t => t.Run("service-disable", (string)item.Tag!));
+            await LoadServices();
+            return;
+        }
         foreach (var item in _serviceItems.Where(i => i.IsChecked))
         {
             ServiceManager.StopAndDisable((string)item.Tag!);
@@ -657,8 +689,15 @@ public partial class MainWindow : Window
         ServicesList.Items.Refresh();
     }
 
-    private void EnableServices_Click(object sender, RoutedEventArgs e)
+    private async void EnableServices_Click(object sender, RoutedEventArgs e)
     {
+        if (_source is { } target)
+        {
+            foreach (var item in _serviceItems.Where(i => i.IsChecked).ToList())
+                await RunOn(target, $"Re-enabling {item.Name}", t => t.Run("service-enable", (string)item.Tag!));
+            await LoadServices();
+            return;
+        }
         foreach (var item in _serviceItems.Where(i => i.IsChecked))
         {
             ServiceManager.EnableAndStart((string)item.Tag!);
@@ -724,8 +763,65 @@ public partial class MainWindow : Window
 
     // --- Startup ---
 
-    private void EnableStartup_Click(object sender, RoutedEventArgs e)
+    /// <summary>The startup entries and the last Windows starts, on this PC or the one being shown.</summary>
+    private async Task LoadStartup()
     {
+        var source = _source;
+        List<StartupService.StartupItem> items;
+        List<Boot> boots;
+        try
+        {
+            (items, boots) = await Task.Run(() =>
+            {
+                if (source == null) return (StartupService.GetItems(), BootService.Read());
+                var startup = JsonSerializer.Deserialize<List<StartupService.StartupItem>>(source.List("startup"), LiveJson) ?? new();
+                try { return (startup, JsonSerializer.Deserialize<List<Boot>>(source.List("boots"), LiveJson) ?? new()); }
+                catch (Exception ex) when (ex is RemoteHistoryException or JsonException) { return (startup, new List<Boot>()); }
+            });
+        }
+        catch (Exception ex) when (ex is RemoteHistoryException or JsonException)
+        {
+            if (source != _source) return;
+            _startupItems.Clear();
+            BootsList.ItemsSource = null;
+            BootsSummary.Text = $"{source!.Name}: {ex.Message}.";
+            return;
+        }
+        if (source != _source) return;
+        _startupItems.Clear();
+        foreach (var item in items)
+            _startupItems.Add(new OptionItem { Name = item.Name, Description = item.Command, Note = item.Location == "Disabled" ? "Disabled" : "Enabled", Tag = item });
+        ShowBoots(boots, source?.Name ?? "this PC");
+    }
+
+    private void ShowBoots(List<Boot> boots, string pc)
+    {
+        BootsList.ItemsSource = boots.Take(10).Select(b => new OptionItem
+        {
+            Name = $"{b.StartUtc.ToLocalTime():ddd d MMM, HH:mm} — {b.Seconds:0} s",
+            Description = b.SlowedBy.Count > 0
+                ? "Held up by " + string.Join(", ", b.SlowedBy.Take(3).Select(s => $"{s.Name} (+{s.ExtraSeconds:0.#} s)"))
+                : $"Desktop after {b.DesktopSeconds:0} s · {b.StartupApps} apps starting with it",
+        }).ToList();
+        if (boots.Count == 0) { BootsSummary.Text = $"Windows hasn't recorded a start on {pc} (its boot diagnostics may be off)."; return; }
+        // The newest five against the ones before: a startup app added since shows as a jump.
+        var recent = boots.Take(5).ToList();
+        var earlier = boots.Skip(5).ToList();
+        double trend = earlier.Count >= 3 ? recent.Average(b => b.Seconds) - earlier.Average(b => b.Seconds) : 0;
+        BootsSummary.Text = $"Windows starts on {pc}: {recent.Average(b => b.Seconds):0} s on average lately"
+            + (Math.Abs(trend) >= 3 ? $" — {Math.Abs(trend):0} s {(trend > 0 ? "slower" : "faster")} than the {earlier.Count} before" : "")
+            + ". From power-on to a settled desktop, as Windows measures it.";
+    }
+
+    private async void EnableStartup_Click(object sender, RoutedEventArgs e)
+    {
+        if (_source is { } target)
+        {
+            foreach (var item in _startupItems.Where(i => i.IsChecked).ToList())
+                await RunOn(target, $"Enabling {item.Name} at startup", t => t.Run("startup-enable", item.Name));
+            await LoadStartup();
+            return;
+        }
         foreach (var item in _startupItems.Where(i => i.IsChecked))
         {
             var startupItem = (StartupService.StartupItem)item.Tag!;
@@ -736,8 +832,15 @@ public partial class MainWindow : Window
         StartupList.Items.Refresh();
     }
 
-    private void DisableStartup_Click(object sender, RoutedEventArgs e)
+    private async void DisableStartup_Click(object sender, RoutedEventArgs e)
     {
+        if (_source is { } target)
+        {
+            foreach (var item in _startupItems.Where(i => i.IsChecked).ToList())
+                await RunOn(target, $"Disabling {item.Name} at startup", t => t.Run("startup-disable", item.Name));
+            await LoadStartup();
+            return;
+        }
         foreach (var item in _startupItems.Where(i => i.IsChecked))
         {
             var startupItem = (StartupService.StartupItem)item.Tag!;

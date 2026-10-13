@@ -43,6 +43,7 @@ public partial class MainWindow
         InitHistory();
         InitEvents();
         InitRemote();
+        InitAutomation();
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
 
@@ -279,6 +280,7 @@ public partial class MainWindow
     // --- Background / tray ---
 
     private System.Windows.Forms.NotifyIcon? _tray;
+    private string? _balloonOpens; // the report the last balloon announced
     private bool _exiting;
 
     private void SetupTray()
@@ -296,7 +298,12 @@ public partial class MainWindow
             Visible = true,
         };
         _tray.DoubleClick += (_, _) => ShowFromTray();
-        _tray.BalloonTipClicked += (_, _) => ShowFromTray();
+        _tray.BalloonTipClicked += (_, _) =>
+        {
+            if (_balloonOpens is { } report) Process.Start(new ProcessStartInfo(report) { UseShellExecute = true });
+            else ShowFromTray();
+            _balloonOpens = null;
+        };
     }
 
     public void ShowFromTray()
