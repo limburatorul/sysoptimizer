@@ -75,11 +75,11 @@
     <FontFamily x:Key="UiFont">Bahnschrift SemiCondensed, Bahnschrift, Segoe UI</FontFamily>
     <sys:Double x:Key="GraphStroke">2.2</sys:Double>
 
-    <!-- Glow: LCARS is flat, so every line glow is off. -->
+    <!-- Glow: LCARS is flat, so the general glow is off; the graph lines keep a soft one. -->
     <DropShadowEffect x:Key="LineGlow" Color="#FF9900" BlurRadius="6" ShadowDepth="0" Opacity="0" />
-    <DropShadowEffect x:Key="LineGlowCpu" Color="#FF9900" BlurRadius="8" ShadowDepth="0" Opacity="0" />
-    <DropShadowEffect x:Key="LineGlowMem" Color="#CC99FF" BlurRadius="8" ShadowDepth="0" Opacity="0" />
-    <DropShadowEffect x:Key="LineGlowGpu" Color="#99CCFF" BlurRadius="8" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#FF9900" BlurRadius="12" ShadowDepth="0" Opacity="0.6" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#CC99FF" BlurRadius="12" ShadowDepth="0" Opacity="0.6" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#99CCFF" BlurRadius="12" ShadowDepth="0" Opacity="0.6" />
 
     <!-- Area under each curve -->
     <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">

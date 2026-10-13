@@ -1,0 +1,107 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!-- Sanctuary: warm black stone, parchment text, antique gold for what you can press, and blood red for
+         what's selected. A serif face and capitals, like the inscriptions. The graphs burn — blood red,
+         gold, and Lilith's violet — with a deep glow. -->
+
+    <!-- Surfaces and text -->
+    <SolidColorBrush x:Key="Surface" Color="#FF0B0807" />
+    <SolidColorBrush x:Key="SurfaceElevated" Color="#FF15100D" />
+    <SolidColorBrush x:Key="Border" Color="#FF3E2B1D" />
+    <LinearGradientBrush x:Key="CardBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FF1A120E" Offset="0" />
+        <GradientStop Color="#FF0F0A08" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="TextPrimary" Color="#FFE6D6B6" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#FF9C8466" />
+    <SolidColorBrush x:Key="LogForeground" Color="#FFD8A24A" />
+
+    <!-- Accent: antique gold -->
+    <SolidColorBrush x:Key="Accent" Color="#FFD8A24A" />
+    <SolidColorBrush x:Key="AccentDim" Color="#40D8A24A" />
+    <SolidColorBrush x:Key="OnAccent" Color="#FF0B0807" />
+
+    <!-- Scrollbar -->
+    <SolidColorBrush x:Key="ScrollThumb" Color="#FF4A3524" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#B0D8A24A" />
+    <SolidColorBrush x:Key="ScrollThumbActive" Color="#FFD8A24A" />
+
+    <!-- One color per metric for CPU / Memory / GPU -->
+    <SolidColorBrush x:Key="AccentCpu" Color="#FFE8352B" />
+    <SolidColorBrush x:Key="AccentMem" Color="#FFE0AE52" />
+    <SolidColorBrush x:Key="AccentGpu" Color="#FFA66EE0" />
+
+    <!-- Good / warning / bad -->
+    <SolidColorBrush x:Key="StatusGood" Color="#FF8FBF5A" />
+    <SolidColorBrush x:Key="StatusWarn" Color="#FFE08A2E" />
+    <SolidColorBrush x:Key="StatusBad" Color="#FFE8352B" />
+    <!-- Temperature band under the History chart: dried blood at rest, ember by 78 °C, StatusBad at 90 °C -->
+    <SolidColorBrush x:Key="TempCool" Color="#FF4A1C17" />
+    <SolidColorBrush x:Key="TempWarm" Color="#FFE08A2E" />
+
+    <!-- Tabs: stone plates; the open one in gold with a red underline -->
+    <SolidColorBrush x:Key="TabBackground" Color="#FF0B0807" />
+    <SolidColorBrush x:Key="TabBackgroundSelected" Color="#FF15100D" />
+    <SolidColorBrush x:Key="TabForeground" Color="#FF9C8466" />
+    <SolidColorBrush x:Key="TabForegroundSelected" Color="#FFE0AE52" />
+    <SolidColorBrush x:Key="TabIndicator" Color="#FFB3141B" />
+    <Thickness x:Key="TabIndicatorThickness">0,0,0,2</Thickness>
+    <Thickness x:Key="TabMargin">0,0,2,0</Thickness>
+    <Thickness x:Key="TabPadding">13,10</Thickness>
+
+    <!-- Buttons, pills, checkboxes -->
+    <LinearGradientBrush x:Key="ButtonBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FF231912" Offset="0" />
+        <GradientStop Color="#FF150F0B" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ButtonForeground" Color="#FFE6D6B6" />
+    <SolidColorBrush x:Key="ButtonBorder" Color="#FF6B4B2C" />
+    <SolidColorBrush x:Key="ButtonHoverBorder" Color="#FFD8A24A" />
+    <SolidColorBrush x:Key="PillBackground" Color="#FF15100D" />
+    <SolidColorBrush x:Key="PillForeground" Color="#FF9C8466" />
+    <!-- Selected: blood red, edged in gold -->
+    <SolidColorBrush x:Key="PillBackgroundSelected" Color="#FF8E1016" />
+    <SolidColorBrush x:Key="PillBorderSelected" Color="#FFD8A24A" />
+    <SolidColorBrush x:Key="PillForegroundSelected" Color="#FFF3E6CC" />
+    <SolidColorBrush x:Key="CheckBorder" Color="#FF7A5634" />
+    <Thickness x:Key="ControlBorderThickness">1</Thickness>
+
+    <!-- Shape: nearly square, as if cut -->
+    <CornerRadius x:Key="CardRadius">3</CornerRadius>
+    <CornerRadius x:Key="ControlRadius">2</CornerRadius>
+    <CornerRadius x:Key="PillRadius">2</CornerRadius>
+    <CornerRadius x:Key="CheckRadius">1</CornerRadius>
+    <CornerRadius x:Key="PopupRadius">3</CornerRadius>
+    <CornerRadius x:Key="TabRadius">0</CornerRadius>
+
+    <!-- Type and line weight: a book face -->
+    <FontFamily x:Key="UiFont">Palatino Linotype, Georgia, Segoe UI</FontFamily>
+    <sys:Double x:Key="GraphStroke">2</sys:Double>
+
+    <!-- Glow: embers -->
+    <DropShadowEffect x:Key="LineGlow" Color="#D8A24A" BlurRadius="14" ShadowDepth="0" Opacity="0.6" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#FF2A1E" BlurRadius="18" ShadowDepth="0" Opacity="0.9" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#E0AE52" BlurRadius="18" ShadowDepth="0" Opacity="0.85" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#A66EE0" BlurRadius="18" ShadowDepth="0" Opacity="0.9" />
+
+    <!-- Area under each curve -->
+    <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#38D8A24A" Offset="0" />
+        <GradientStop Color="#00D8A24A" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AreaFillCpu" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#48E8352B" Offset="0" />
+        <GradientStop Color="#00E8352B" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AreaFillMem" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#40E0AE52" Offset="0" />
+        <GradientStop Color="#00E0AE52" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AreaFillGpu" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#40A66EE0" Offset="0" />
+        <GradientStop Color="#00A66EE0" Offset="1" />
+    </LinearGradientBrush>
+
+</ResourceDictionary>

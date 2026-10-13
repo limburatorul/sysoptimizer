@@ -215,7 +215,7 @@ public partial class MainWindow
             string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sysoptimizer");
             Directory.CreateDirectory(folder);
             string path = Path.Combine(folder, $"Report {from:yyyy-MM-dd} to {to.AddSeconds(-1):yyyy-MM-dd}.html");
-            await File.WriteAllTextAsync(path, ReportService.Html(from, to.AddSeconds(-1), parts));
+            await File.WriteAllTextAsync(path, ReportService.Html(from, to.AddSeconds(-1), parts, _kwhPrice, _currency, _extraWatts));
             Log($"Report saved: {path}");
             return path;
         }

@@ -55,6 +55,9 @@ try
         $"S,{noon + 2},100,31,2,70,41,250,90",    // the spike, inside the same minute
         $"S,{noon + 3},7,30,1,61,40,1,1,90,40,900,80",
         $"S,{noon + 5},7,30,1,61,40,1,1,150,60,1500,62",   // a laptop: power and fans peak, battery drains
+        $"S,{noon + 6},7,30,1,61,40,1,1,90,40,900,80,144", // a game in front at 144 FPS…
+        $"S,{noon + 7},7,30,1,61,40,1,1,90,40,900,80,38",  // …dropping to 38 for a second
+        $"P,{noon + 6},game,20,4000,90,141",
         $"P,{noon},quiet,1,100,0",
         $"P,{noon + 2},burner,95,500,0",
         $"E,{noon + 2},sleep,",
@@ -62,7 +65,9 @@ try
     };
     File.WriteAllLines(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.csv"), lines);
     var raw = HistoryStore.ReadDay(yesterday, minutes: false);
-    Check(raw.System.Count == 5, "old day: torn and junk lines skipped, five samples read");
+    Check(raw.System.Count == 7, "old day: torn and junk lines skipped, seven samples read");
+    Check(float.IsNaN(raw.System[0].Fps) && raw.System[5].Fps == 144, "fps: older lines read as unknown, new ones keep it");
+    Check(raw.Processes.Single(p => p.Name == "game").Fps == 141 && float.IsNaN(raw.Processes.Single(p => p.Name == "quiet").Fps), "fps: an app's own rate round-trips, older app lines have none");
     Check(float.IsNaN(raw.System[0].DiskMBs) && float.IsNaN(raw.System[0].NetMbps), "old day: a 7-field line reads disk/network as unknown");
     Check(raw.System[1].DiskMBs == 10 && raw.System[1].NetMbps == 2, "old day: a 9-field line keeps disk/network");
 
@@ -73,6 +78,8 @@ try
     Check(m.Cpu == 100 && m.DiskMBs == 250 && m.NetMbps == 90 && m.CpuTemp == 70, "minutes: peaks survive, disk/network included");
     Check(m.CpuWatts == 150 && m.GpuWatts == 60 && m.FanRpm == 1500, "minutes: power and fan peaks survive");
     Check(m.BatteryPct == 62, "minutes: the battery keeps its lowest charge, not its highest");
+    Check(m.Fps == 38, "minutes: FPS keeps the minute's lowest — the stutter, not the best");
+    Check(minutes.Processes.Any(p => p.Name == "game" && p.Fps == 141), "minutes: an app's frame rate is kept");
     Check(minutes.Processes.Any(p => p.Name == "burner" && p.Cpu == 95), "minutes: the app behind the spike is kept at its peak");
     Check(minutes.Events.Count == 1 && minutes.Events[0].Kind == "sleep", "minutes: events copied through");
     Check(File.Exists(Path.Combine(folder, $"{yesterday:yyyy-MM-dd}.min.csv")), "minutes: summary file written for a finished day");
@@ -91,7 +98,7 @@ try
     Check(File.Exists(Day(gzDay, ".csv.br")) && !File.Exists(Day(gzDay, ".csv.gz")), "maintain: a gzipped day repacked");
     Check(HistoryStore.ReadDay(gzDay, minutes: false).System.SingleOrDefault().Cpu == 33, "maintain: the repacked day reads the same");
     Check(!File.Exists(Day(old, ".csv")), "maintain: a day past retention deleted");
-    Check(HistoryStore.ReadDay(yesterday, minutes: false).System.Count == 5, "maintain: the packed day reads the same");
+    Check(HistoryStore.ReadDay(yesterday, minutes: false).System.Count == 7, "maintain: the packed day reads the same");
     Check(HistoryStore.ReadDay(yesterday, minutes: true).System.SingleOrDefault().Cpu == 100, "maintain: the packed summary reads the same");
     using (var br = new StreamReader(new BrotliStream(File.OpenRead(Day(yesterday, ".csv.br")), CompressionMode.Decompress)))
         Check(br.ReadToEnd().Contains("burner"), "maintain: the pack holds the original lines");

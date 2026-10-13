@@ -83,9 +83,9 @@
 
     <!-- Glow -->
     <DropShadowEffect x:Key="LineGlow" Color="#4FB3D1" BlurRadius="8" ShadowDepth="0" Opacity="0.45" />
-    <DropShadowEffect x:Key="LineGlowCpu" Color="#4FB3D1" BlurRadius="10" ShadowDepth="0" Opacity="0.55" />
-    <DropShadowEffect x:Key="LineGlowMem" Color="#6CC48A" BlurRadius="10" ShadowDepth="0" Opacity="0.55" />
-    <DropShadowEffect x:Key="LineGlowGpu" Color="#D9A441" BlurRadius="10" ShadowDepth="0" Opacity="0.55" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#4FB3D1" BlurRadius="16" ShadowDepth="0" Opacity="0.85" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#6CC48A" BlurRadius="16" ShadowDepth="0" Opacity="0.85" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#D9A441" BlurRadius="16" ShadowDepth="0" Opacity="0.85" />
 
     <!-- Area under each curve -->
     <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">

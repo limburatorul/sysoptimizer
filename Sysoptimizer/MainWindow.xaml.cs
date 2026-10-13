@@ -62,6 +62,8 @@ public partial class MainWindow : Window
         // Subtle horizontal gridlines with their value to the left, built lazily on first draw — see UpdateAxisGridlines.
         public System.Windows.Shapes.Line[]? GridLines;
         public System.Windows.Controls.TextBlock[]? GridLabels;
+        public System.Windows.Shapes.Ellipse? Dot;           // the live end of the curve
+        public LinearGradientBrush? FadeIn;                    // softens where the recorded data begins
     }
     private static readonly double[] AxisFractions = { 0.0, 0.5, 1.0 }; // fraction of card height, top to bottom
     private readonly List<GraphBinding> _liveGraphs = new();
@@ -74,11 +76,11 @@ public partial class MainWindow : Window
         SourceInitialized += (_, _) => WindowGlass.EnableAcrylic(this);
         Closed += (_, _) => { _resourceTimer?.Stop(); _resourceMonitor?.Dispose(); CompositionTarget.Rendering -= OnRendering; ThemeManager.ThemeChanged -= OnThemeChanged; _updateTimer.Stop(); };
         ThemeManager.ThemeChanged += OnThemeChanged;
-        (ThemeManager.Current.Key switch { "StarTrek" => ThemeStarTrek, "StarCraft" => ThemeStarCraft, "Cyberpunk" => ThemeCyberpunk, _ => ThemeGlass }).IsChecked = true;
+        InitThemePicker();
 
-        _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 22 });
-        _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 30 });
-        _liveGraphs.Add(new GraphBinding { Container = GpuGraphGrid, Line = GpuSparkline, Fill = GpuAreaFill, History = _gpuHistory, AutoScale = false });
+        _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 40 });
+        _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 46 });
+        _liveGraphs.Add(new GraphBinding { Container = GpuGraphGrid, Line = GpuSparkline, Fill = GpuAreaFill, History = _gpuHistory, AutoScale = false, AxisTopInset = 6 });
         CompositionTarget.Rendering += OnRendering;
 
         ApplyRoundedClip(CpuCardBorder);
@@ -325,8 +327,38 @@ public partial class MainWindow : Window
     }
 
     /// <summary>A reading onto the Resources, Disks and Network tabs — this PC's, or the one being watched.</summary>
+    private string _driveHealthShown = "";
+
+    /// <summary>The drives' health on the Disks tab — rebuilt only when something in it changed.</summary>
+    private void ShowDriveHealth(List<DriveHealth> drives)
+    {
+        var rows = drives.Select(d => new OptionItem { Name = d.Name, Description = DriveDetails(d), Note = DriveStatus(d).Text, Tag = DriveStatus(d).Level }).ToList();
+        string shown = string.Join("|", rows.Select(r => r.Name + r.Description + r.Note));
+        if (shown == _driveHealthShown) return;
+        _driveHealthShown = shown;
+        DriveHealthList.ItemsSource = rows;
+        DriveHealthPanel.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static string DriveDetails(DriveHealth d) => string.Join(" · ", new[]
+    {
+        double.IsNaN(d.TempC) ? null : $"{d.TempC:0}°C" + (double.IsNaN(d.WarnTempC) ? "" : $" (warns at {d.WarnTempC:0}°C)"),
+        double.IsNaN(d.LifePercent) ? null : $"{d.LifePercent:0}% life left",
+        double.IsNaN(d.PowerOnHours) ? null : $"{d.PowerOnHours:N0} h powered on",
+        double.IsNaN(d.WrittenTB) ? null : $"{d.WrittenTB:0.#} TB written",
+        d.WindowsHealth is { } w ? $"Windows: {w}" : null,
+    }.Where(x => x != null));
+
+    /// <summary>The drive's state in a word, and how worried to be: ok, warn or bad.</summary>
+    internal static (string Text, string Level) DriveStatus(DriveHealth d) =>
+        d.WindowsHealth == "Unhealthy" || d.SpareBelowThreshold || d.LifePercent <= 5 ? ("Failing — back it up", "bad")
+        : d.WindowsHealth == "Warning" || d.LifePercent <= 10 ? ("Wearing out", "warn")
+        : d.TempC >= d.WarnTempC ? ("Running hot", "warn")
+        : ("Healthy", "ok");
+
     private void ShowSnapshot(ResourceSnapshot snap)
     {
+        ShowDriveHealth(snap.DriveHealth);
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
         CpuDetailText.Text = string.Join(" · ", new[]
         {
@@ -350,7 +382,8 @@ public partial class MainWindow : Window
         if (snap.GpuAvailable)
         {
             GpuPercentText.Text = $"{snap.GpuPercent:0}%";
-            GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM{Temp(snap.GpuTempC)}" + (double.IsNaN(snap.GpuWatts) ? "" : $" · {snap.GpuWatts:0} W");
+            GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM{Temp(snap.GpuTempC)}" + (double.IsNaN(snap.GpuWatts) ? "" : $" · {snap.GpuWatts:0} W")
+                + (double.IsNaN(snap.Fps) ? "" : $" · {snap.Fps:0} FPS in {snap.FpsApp}");
             PushHistory(_gpuHistory, snap.GpuPercent);
         }
 
@@ -523,6 +556,7 @@ public partial class MainWindow : Window
         {
             if (g.GridLines != null)
                 foreach (var el in g.GridLines.Cast<UIElement>().Concat(g.GridLabels!)) el.Visibility = Visibility.Collapsed;
+            if (g.Dot != null) g.Dot.Visibility = Visibility.Collapsed;
             return;
         }
         double width = container.ActualWidth > 0 ? container.ActualWidth : 220;
@@ -533,7 +567,7 @@ public partial class MainWindow : Window
         // instead of vanishing the moment its start point crosses x=0.
         var points = history.ToList();
         int first = points.FindIndex(s => s.Time >= windowStart);
-        if (first < 0) { line.Data = null; fill.Data = null; return; }
+        if (first < 0) { line.Data = null; fill.Data = null; if (g.Dot != null) g.Dot.Visibility = Visibility.Collapsed; return; }
         points.RemoveRange(0, Math.Max(0, first - 1));
 
         // Ease the newest value in instead of snapping to it the instant a sample lands — a fresh sample
@@ -551,7 +585,9 @@ public partial class MainWindow : Window
         // ceiling, so scale those to the window's own peak instead of clamping to a percentage.
         double max = autoScale ? Math.Max(1, points.Max(p => p.Value)) : 100;
         if (g.ShowAxis) UpdateAxisGridlines(g, width, height, max, autoScale, g.AxisTopInset);
-        double XOf(DateTime t) => width * (1 - (now - t).TotalSeconds / _historyWindowSeconds);
+        // The live end stops short of the right edge, so its dot shows whole instead of cut in half.
+        double right = g.ShowAxis ? width - LiveDotSize : width;
+        double XOf(DateTime t) => right * (1 - (now - t).TotalSeconds / _historyWindowSeconds);
         double YOf(double v) => height - Math.Clamp(v, 0, max) / max * height;
 
         var figure = new PathFigure { StartPoint = new Point(XOf(points[0].Time), YOf(points[0].Value)) };
@@ -572,13 +608,40 @@ public partial class MainWindow : Window
         // minutes in on the 5-minute view), the real data doesn't reach x=0, and closing to the literal
         // corner instead of under the first point drew a diagonal cutting clean across the card.
         var areaFigure = figure.Clone();
-        areaFigure.Segments.Add(new LineSegment(new Point(width, height), true)); // last point's X is always "now" == width
+        areaFigure.Segments.Add(new LineSegment(new Point(right, height), true)); // last point's X is always "now"
         areaFigure.Segments.Add(new LineSegment(new Point(figure.StartPoint.X, height), true));
         areaFigure.IsClosed = true;
         var areaGeometry = new PathGeometry();
         areaGeometry.Figures.Add(areaFigure);
         fill.Data = areaGeometry;
+
+        // Where the recording begins mid-card (just after launch, or on a longer window) the curve and its
+        // fill rise out of nothing over a few dozen pixels instead of starting at a hard vertical wall. Once
+        // the data reaches the left edge there's no wall, and no fade: on a tall fill it would read as a band.
+        double fadeStart = figure.StartPoint.X;
+        if (g.FadeIn == null)
+        {
+            g.FadeIn = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute };
+            g.FadeIn.GradientStops.Add(new GradientStop(Colors.Transparent, 0));
+            g.FadeIn.GradientStops.Add(new GradientStop(Colors.Black, 1));
+        }
+        line.OpacityMask = fill.OpacityMask = fadeStart > 1 ? g.FadeIn : null;
+        g.FadeIn.StartPoint = new Point(fadeStart, 0);
+        g.FadeIn.EndPoint = new Point(fadeStart + 36, 0);
+
+        if (!g.ShowAxis) return; // the per-thread minis stay plain
+        if (g.Dot == null)
+        {
+            g.Dot = new System.Windows.Shapes.Ellipse { Width = LiveDotSize, Height = LiveDotSize, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false };
+            g.Dot.SetBinding(System.Windows.Shapes.Shape.FillProperty, new System.Windows.Data.Binding(nameof(line.Stroke)) { Source = line });
+            g.Dot.SetBinding(UIElement.EffectProperty, new System.Windows.Data.Binding(nameof(line.Effect)) { Source = line });
+            ((System.Windows.Controls.Panel)container).Children.Add(g.Dot);
+        }
+        g.Dot.Visibility = Visibility.Visible;
+        g.Dot.Margin = new Thickness(right - LiveDotSize / 2, YOf(g.DisplayValue) - LiveDotSize / 2, 0, 0);
     }
+
+    private const double LiveDotSize = 7;
 
     /// <summary>Three subtle horizontal lines with their value to the right, like Task Manager's graph scale — built once per card, repositioned every frame since autoscaled cards (disk/network) change their max as new peaks come in.</summary>
     private static void UpdateAxisGridlines(GraphBinding g, double width, double height, double max, bool autoScale, double topInset)
@@ -590,7 +653,7 @@ public partial class MainWindow : Window
             g.GridLabels = new System.Windows.Controls.TextBlock[AxisFractions.Length];
             for (int i = 0; i < AxisFractions.Length; i++)
             {
-                var gridLine = new System.Windows.Shapes.Line { StrokeThickness = 1, Opacity = 0.2 };
+                var gridLine = new System.Windows.Shapes.Line { StrokeThickness = 1, Opacity = 0.18, StrokeDashArray = new DoubleCollection { 2, 4 } };
                 gridLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
                 var label = new System.Windows.Controls.TextBlock { FontSize = 9, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
                 label.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "TextSecondary");
@@ -604,7 +667,9 @@ public partial class MainWindow : Window
         for (int i = 0; i < AxisFractions.Length; i++)
         {
             double y = AxisFractions[i] * height;
-            g.GridLines[i].Visibility = g.GridLabels![i].Visibility = Visibility.Visible;
+            g.GridLabels![i].Visibility = Visibility.Visible;
+            // Only the middle line: the card's own top and bottom edges are 100% and 0%.
+            g.GridLines[i].Visibility = AxisFractions[i] is > 0 and < 1 ? Visibility.Visible : Visibility.Collapsed;
             g.GridLines[i].X1 = 0; g.GridLines[i].X2 = width; g.GridLines[i].Y1 = y; g.GridLines[i].Y2 = y;
             double value = max * (1 - AxisFractions[i]);
             g.GridLabels![i].Text = autoScale ? $"{value:0.#}" : $"{value:0}%"; // an idle 1 MB/s scale read "1, 1, 0"
@@ -1136,10 +1201,45 @@ public partial class MainWindow : Window
         foreach (UIElement child in pages.Children) child.Visibility = child == page ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void Theme_Checked(object sender, RoutedEventArgs e)
+    private string _savedTheme = ThemeManager.Current.Key;
+
+    /// <summary>
+    /// The theme list: each entry with a small plate in that theme's own colours (its surface, the three graph
+    /// colours and its accent) and its name in its own font. Hovering an entry puts the whole window in that
+    /// theme; closing the list keeps the one clicked, or goes back.
+    /// </summary>
+    private void InitThemePicker()
     {
-        if (sender is System.Windows.Controls.RadioButton { Tag: string key } && key != ThemeManager.Current.Key)
-            ThemeManager.Apply(key);
+        foreach (var theme in ThemeManager.Themes)
+        {
+            var colours = new ResourceDictionary { Source = new Uri($"pack://application:,,,/Themes/{theme.Key}.xaml", UriKind.Absolute) };
+            var dots = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            foreach (var key in new[] { "AccentCpu", "AccentMem", "AccentGpu", "Accent" })
+                dots.Children.Add(new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(2, 0, 2, 0), Fill = (Brush)colours[key] });
+            var plate = new System.Windows.Controls.Border
+            {
+                Width = 52, Height = 18, Margin = new Thickness(0, 0, 10, 0), BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4), Background = (Brush)colours["Surface"], BorderBrush = (Brush)colours["Border"], Child = dots,
+            };
+            var row = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+            row.Children.Add(plate);
+            row.Children.Add(new System.Windows.Controls.TextBlock { Text = theme.Label, FontFamily = (FontFamily)colours["UiFont"], VerticalAlignment = VerticalAlignment.Center });
+            var item = new System.Windows.Controls.ComboBoxItem { Content = row, Tag = theme.Key };
+            System.Windows.Automation.AutomationProperties.SetName(item, theme.Label);
+            item.MouseEnter += (_, _) => { if (ThemeCombo.IsDropDownOpen && ThemeManager.Current.Key != theme.Key) ThemeManager.Apply(theme.Key, save: false); };
+            ThemeCombo.Items.Add(item);
+        }
+        ThemeCombo.SelectedItem = ThemeCombo.Items.Cast<System.Windows.Controls.ComboBoxItem>().First(i => (string)i.Tag == ThemeManager.Current.Key);
+        ThemeCombo.DropDownClosed += (_, _) => KeepTheme();
+        ThemeCombo.SelectionChanged += (_, _) => { if (!ThemeCombo.IsDropDownOpen) KeepTheme(); }; // the keyboard, with the list shut
+    }
+
+    /// <summary>The theme picked in the list stays (and is saved); a hovered one that wasn't picked is undone.</summary>
+    private void KeepTheme()
+    {
+        if (ThemeCombo.SelectedItem is not System.Windows.Controls.ComboBoxItem { Tag: string key }) return;
+        if (key != _savedTheme) { ThemeManager.Apply(key); _savedTheme = key; }
+        else if (ThemeManager.Current.Key != key) ThemeManager.Apply(key, save: false);
     }
 
     private void OnThemeChanged()

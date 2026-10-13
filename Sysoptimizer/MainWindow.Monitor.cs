@@ -78,7 +78,7 @@ public partial class MainWindow
         bool processesShown = ProcessesList.IsVisible;
         List<ProcessUsage>? processes = null;
         if (historyTick || (processesShown && _tick % 2 == 0))
-            processes = _lastProcesses = await Task.Run(() => _processMonitor.Sample(snap.GpuByPid));
+            processes = _lastProcesses = await Task.Run(() => _processMonitor.Sample(snap.GpuByPid, snap.FpsByPid));
 
         // The first tick only primes the baselines (CPU% is a delta between two readings, so everything
         // reads 0 on it) — recording it would drag every average and minimum down.
@@ -89,9 +89,9 @@ public partial class MainWindow
             snap.GpuAvailable ? (float)snap.GpuPercent : float.NaN, (float)snap.CpuTempC, (float)snap.GpuTempC,
             (float)snap.Disks.Sum(d => d.ReadMBs + d.WriteMBs), (float)snap.Nets.Sum(n => n.DownMbps + n.UpMbps),
             (float)snap.CpuWatts, (float)snap.GpuWatts, snap.Fans.Count > 0 ? (float)snap.Fans.Max(f => f.Rpm) : float.NaN,
-            snap.Battery is { } battery ? (float)battery.Percent : float.NaN);
+            snap.Battery is { } battery ? (float)battery.Percent : float.NaN, (float)snap.Fps);
         var top = historyTick && processes != null
-            ? ProcessMonitor.ForHistory(processes).Select(p => new ProcSample(now, p.Name, (float)p.Cpu, (float)p.RamMB, (float)p.Gpu)).ToList()
+            ? ProcessMonitor.ForHistory(processes).Select(p => new ProcSample(now, p.Name, (float)p.Cpu, (float)p.RamMB, (float)p.Gpu, p.Fps >= 1 ? (float)p.Fps : float.NaN)).ToList()
             : null;
         try
         {
@@ -114,6 +114,7 @@ public partial class MainWindow
         {
             _pawnIoHintShown = true;
             if (_resourceMonitor?.SensorError is { } error) Log($"Temperatures unavailable — {error}");
+            if (_resourceMonitor?.FpsError is { } fpsError) Log($"FPS unavailable — {fpsError}");
             else if (double.IsNaN(snap.CpuTempC)) Log("CPU temperature needs the PawnIO driver — install it with: winget install namazso.PawnIO");
         }
     }

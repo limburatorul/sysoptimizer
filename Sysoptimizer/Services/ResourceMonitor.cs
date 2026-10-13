@@ -39,6 +39,17 @@ public class ResourceMonitor : IDisposable
     private DateTime _lastSample = DateTime.UtcNow;
     private readonly Dictionary<string, (long sent, long recv)> _lastNetBytes = new();
 
+    private readonly FpsMonitor _fps = new();
+    public string? FpsError => _fps.Error;
+    private readonly Task<DiskHealthService?> _diskHealth = Task.Run(() =>
+    {
+        try { return new DiskHealthService(); }
+        catch (Exception) { return null; } // ponytail: no drive health then; the Disks tab says nothing is known
+    });
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out int pid);
+
     public ResourceMonitor()
     {
         _sensors = Task.Run(() =>
@@ -216,6 +227,17 @@ public class ResourceMonitor : IDisposable
 
         if ((now - _drivesReadAt).TotalSeconds >= 30) (_drives, _drivesReadAt) = (ReadDrives(), now);
         snap.Drives = _drives;
+        if (_diskHealth.IsCompletedSuccessfully && _diskHealth.Result is { } health) snap.DriveHealth = health.Latest();
+
+        // Frames per second: every app's, and the one in front's — a game being played.
+        snap.FpsByPid = _fps.Read();
+        GetWindowThreadProcessId(GetForegroundWindow(), out int front);
+        if (snap.FpsByPid.TryGetValue(front, out double fps) && fps >= 1)
+        {
+            snap.Fps = fps;
+            try { using var p = System.Diagnostics.Process.GetProcessById(front); snap.FpsApp = p.ProcessName; }
+            catch (ArgumentException) { } // closed this very moment
+        }
         return snap;
     }
 
@@ -241,6 +263,8 @@ public class ResourceMonitor : IDisposable
     public void Dispose()
     {
         _query.Dispose();
+        _fps.Dispose();
+        if (_diskHealth.IsCompletedSuccessfully) _diskHealth.Result?.Dispose();
         if (_sensors.IsCompletedSuccessfully) _sensors.Result?.Dispose();
     }
 }

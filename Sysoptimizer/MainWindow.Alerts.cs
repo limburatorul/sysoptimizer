@@ -119,7 +119,7 @@ public partial class MainWindow
     };
 
     private int _alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes, _alertAppMem, _alertDisk, _alertBattery;
-    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn, _alertCoolingOn;
+    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn, _alertCoolingOn, _alertDriveOn;
     private bool _alertSettingsLoading;
 
     private void LoadAlertSettings()
@@ -134,6 +134,7 @@ public partial class MainWindow
             }
             AlertUnsignedCheck.IsChecked = key?.GetValue(CheckName(AlertUnsignedCheck)) is int u ? u == 1 : true;
             AlertCoolingCheck.IsChecked = key?.GetValue(CheckName(AlertCoolingCheck)) is int c ? c == 1 : true;
+            AlertDriveCheck.IsChecked = key?.GetValue(CheckName(AlertDriveCheck)) is int dr ? dr == 1 : true;
         }
         _alertSettingsLoading = false;
         ApplyAlertSettings(save: false);
@@ -164,6 +165,8 @@ public partial class MainWindow
         key?.SetValue(CheckName(AlertUnsignedCheck), AlertUnsignedCheck.IsChecked == true ? 1 : 0, RegistryValueKind.DWord);
         key?.SetValue(CheckName(AlertCoolingCheck), AlertCoolingCheck.IsChecked == true ? 1 : 0, RegistryValueKind.DWord);
         _alertCoolingOn = AlertCoolingCheck.IsChecked == true;
+        key?.SetValue(CheckName(AlertDriveCheck), AlertDriveCheck.IsChecked == true ? 1 : 0, RegistryValueKind.DWord);
+        _alertDriveOn = AlertDriveCheck.IsChecked == true;
 
         (_alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes) =
             (values["CpuTemp"], values["GpuTemp"], values["Memory"], values["AppCpu"], values["AppMinutes"]);
@@ -236,6 +239,9 @@ public partial class MainWindow
             () => $"{who}Memory at {snap.MemPercent:0}% for over a minute (limit {_alertMem}%)");
         if (_alertBatteryOn && snap.Battery is { PluggedIn: false } battery && battery.Percent <= _alertBattery)
             Alert(key + "battery", $"{who}Battery at {battery.Percent:0}% and not plugged in (limit {_alertBattery}%)");
+        if (_alertDriveOn)
+            foreach (var drive in snap.DriveHealth.Where(d => DriveStatus(d).Level != "ok"))
+                Alert(key + "drive:" + drive.Name, $"{who}{drive.Name}: {DriveStatus(drive).Text.ToLowerInvariant()} — {DriveDetails(drive)}");
         if (_alertDiskOn)
             foreach (var drive in snap.Drives.Where(d => d.TotalGB > 0 && d.FreeGB / d.TotalGB * 100 <= _alertDisk))
                 Alert(key + "disk:" + drive.Name, $"{who}{drive.Name} is almost full — {drive.FreeGB:0.#} GB free of {drive.TotalGB:0} GB (limit {_alertDisk}% free)");
@@ -319,8 +325,12 @@ public partial class MainWindow
         $"MEM {s.MemPercent:0}%",
         s.GpuAvailable ? $"GPU {s.GpuPercent:0}%" + (double.IsNaN(s.GpuTempC) ? "" : $" {s.GpuTempC:0}°C") : null,
         s.Battery is { } b ? $"battery {b.Percent:0}%{(b.PluggedIn ? "" : " (unplugged)")}" : null,
+        double.IsNaN(s.Fps) ? null : $"{s.Fps:0} FPS in {s.FpsApp}",
         s.Drives.Count > 0 ? $"least free disk {s.Drives.Min(d => d.TotalGB > 0 ? d.FreeGB / d.TotalGB * 100 : 100):0}%" : null,
-    }.Where(x => x != null));
+    }.Where(x => x != null)
+     // Each reading stays whole (no-break spaces, and a word joiner so "38°C" can't split at the degree sign):
+     // a line only wraps between readings, so the card's height doesn't jump as the numbers change.
+     .Select(x => x!.Replace(" ", "\u00A0").Replace("°C", "°\u2060C")));
 
     private void RemoteAlerts_Click(object sender, RoutedEventArgs e)
     {

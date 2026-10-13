@@ -12,7 +12,7 @@ public static class Tools
     private const string RangeHelp = "Time range: either last_minutes, or from/to as local ISO date-times like 2026-10-05T14:00. Default: the last 60 minutes.";
     private const string SampleNote = "Only the heaviest apps are recorded each time (top by CPU, memory and GPU every 10 s), so small background apps may be missing.";
 
-    private static readonly string[] Metrics = { "cpu", "mem", "gpu", "cpu_temp", "gpu_temp", "disk", "net", "cpu_power", "gpu_power", "fan", "battery" };
+    private static readonly string[] Metrics = { "cpu", "mem", "gpu", "cpu_temp", "gpu_temp", "disk", "net", "cpu_power", "gpu_power", "fan", "battery", "fps" };
 
     // The params constructor, not a collection initializer: the initializer binds to the generic Add<T>,
     // which the trimmer (rightly, in general) flags as unsafe.
@@ -284,19 +284,19 @@ public static class Tools
 
     private static float Value(SysSample s, string metric) => metric switch
     {
-        "mem" => s.Mem, "gpu" => s.Gpu, "cpu_temp" => s.CpuTemp, "gpu_temp" => s.GpuTemp, "disk" => s.DiskMBs, "net" => s.NetMbps, "cpu_power" => s.CpuWatts, "gpu_power" => s.GpuWatts, "fan" => s.FanRpm, "battery" => s.BatteryPct, _ => s.Cpu,
+        "mem" => s.Mem, "gpu" => s.Gpu, "cpu_temp" => s.CpuTemp, "gpu_temp" => s.GpuTemp, "disk" => s.DiskMBs, "net" => s.NetMbps, "cpu_power" => s.CpuWatts, "gpu_power" => s.GpuWatts, "fan" => s.FanRpm, "battery" => s.BatteryPct, "fps" => s.Fps, _ => s.Cpu,
     };
 
     private static string Label(string metric) => metric switch
     {
         "mem" => "Memory", "gpu" => "GPU", "cpu_temp" => "CPU temperature", "gpu_temp" => "GPU temperature",
         "disk" => "Disk (read + write)", "net" => "Network (down + up)", "cpu_power" => "CPU power", "gpu_power" => "GPU power",
-        "fan" => "Fastest fan", "battery" => "Battery", _ => "CPU",
+        "fan" => "Fastest fan", "battery" => "Battery", "fps" => "FPS of the app in front", _ => "CPU",
     };
 
     private static string Fmt(double v, string metric) => metric switch
     {
-        "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", "cpu_power" or "gpu_power" => $"{v:0} W", "fan" => $"{v:0} RPM",
+        "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", "cpu_power" or "gpu_power" => $"{v:0} W", "fan" => $"{v:0} RPM", "fps" => $"{v:0} FPS",
         _ when metric.EndsWith("temp") => $"{v:0}°C", _ => $"{v:0}%",
     };
     private static string Pct(float v) => float.IsNaN(v) ? "n/a" : $"{v:0}%";

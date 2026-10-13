@@ -67,7 +67,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border x:Name="Card" Width="300" Padding="14,10" Margin="0,0,10,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                            <Border x:Name="Card" Width="345" Padding="14,10" Margin="0,0,10,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                                 <DockPanel>
                                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                                                         <Button x:Name="ShowButton" Content="Show" Tag="{Binding}" Click="PcShow_Click" Margin="6,0,0,0" AutomationProperties.Name="{Binding Name, StringFormat=Show {0} in every tab}" />
@@ -124,41 +124,41 @@
                                 </StackPanel>
                             </DockPanel>
                             <StackPanel>
-                                <Border x:Name="CpuCardBorder" Height="150" Margin="0,0,0,10" Padding="0,14,0,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
+                                <Border x:Name="CpuCardBorder" Height="150" Margin="0,0,0,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                                     <Grid x:Name="CpuGraphGrid">
                                         <Path x:Name="CpuAreaFill" Fill="{DynamicResource AreaFillCpu}" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
                                         <Path x:Name="CpuSparkline" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{DynamicResource AccentCpu}" StrokeThickness="{DynamicResource GraphStroke}"
                                               StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Effect="{DynamicResource LineGlowCpu}" />
-                                        <StackPanel VerticalAlignment="Top" Margin="14,0">
+                                        <StackPanel VerticalAlignment="Top" Margin="14,14,14,0">
                                             <TextBlock Text="CPU" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                             <TextBlock x:Name="CpuPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
                                             <TextBlock x:Name="CpuDetailText" Text="" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
-                                        <CheckBox x:Name="CpuPerThreadCheck" Content="Per thread" Style="{StaticResource PillToggle}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,14,0"
+                                        <CheckBox x:Name="CpuPerThreadCheck" Content="Per thread" Style="{StaticResource PillToggle}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0"
                                                   Checked="CpuPerThread_Changed" Unchecked="CpuPerThread_Changed" />
-                                        <UniformGrid x:Name="CpuThreadsGrid" Visibility="Collapsed" Margin="11,56,11,11" />
+                                        <UniformGrid x:Name="CpuThreadsGrid" Visibility="Collapsed" Margin="11,70,11,11" />
                                     </Grid>
                                 </Border>
-                                <Border x:Name="MemCardBorder" Height="150" Margin="0,0,0,10" Padding="0,14,0,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
+                                <Border x:Name="MemCardBorder" Height="150" Margin="0,0,0,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                                     <Grid x:Name="MemGraphGrid">
                                         <Path x:Name="MemAreaFill" Fill="{DynamicResource AreaFillMem}" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
                                         <Path x:Name="MemSparkline" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{DynamicResource AccentMem}" StrokeThickness="{DynamicResource GraphStroke}"
                                               StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Effect="{DynamicResource LineGlowMem}" />
-                                        <StackPanel VerticalAlignment="Top" Margin="14,0">
+                                        <StackPanel VerticalAlignment="Top" Margin="14,14,14,0">
                                             <TextBlock Text="MEMORY" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                             <TextBlock x:Name="MemPercentText" Text="0%" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
                                             <TextBlock x:Name="MemDetailText" Text="0 / 0 GB" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
-                                        <Button x:Name="FreeMemoryButton" Content="Free memory" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,14,0" Padding="10,3" FontSize="11" Click="TrimMemory_Click"
+                                        <Button x:Name="FreeMemoryButton" Content="Free memory" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0" Padding="10,3" FontSize="11" Click="TrimMemory_Click"
                                                 ToolTip="Trims every process's working set: its pages move to standby or the pagefile, and free RAM rises right away. Apps read back what they use next, so they can feel slower for a moment. It doesn't make Windows faster in general." />
                                     </Grid>
                                 </Border>
-                                <Border x:Name="GpuCardBorder" Height="150" Padding="0,14,0,0" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
+                                <Border x:Name="GpuCardBorder" Height="150" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1" ClipToBounds="True">
                                     <Grid x:Name="GpuGraphGrid">
                                         <Path x:Name="GpuAreaFill" Fill="{DynamicResource AreaFillGpu}" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
                                         <Path x:Name="GpuSparkline" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" Stroke="{DynamicResource AccentGpu}" StrokeThickness="{DynamicResource GraphStroke}"
                                               StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Effect="{DynamicResource LineGlowGpu}" />
-                                        <StackPanel VerticalAlignment="Top" Margin="14,0">
+                                        <StackPanel VerticalAlignment="Top" Margin="14,14,14,0">
                                             <TextBlock Text="GPU" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                             <TextBlock x:Name="GpuPercentText" Text="—" FontSize="26" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular" />
                                             <TextBlock x:Name="GpuDetailText" Text="Not available" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
@@ -306,6 +306,8 @@
                                                     <TextBlock Text="% unplugged" />
                                                 </StackPanel>
                                                 <CheckBox x:Name="AlertUnsignedCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="An unsigned app starts" />
+                                                <CheckBox x:Name="AlertDriveCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="A drive is failing or wearing out"
+                                                          ToolTip="Windows or the drive itself reports a problem, an SSD has 10% of its life left or less, or a drive runs past its own warning temperature" />
                                                 <CheckBox x:Name="AlertCoolingCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="Cooling got worse"
                                                           ToolTip="Once a day: if the CPU or GPU runs 7 °C or more hotter than a month ago at the same light load — dust, or a slowing fan" />
                                             </WrapPanel>
@@ -351,6 +353,8 @@
                                 <RadioButton x:Name="HistoryMetricCpu" Content="CPU" GroupName="HistoryMetric" Tag="cpu" Style="{StaticResource PillToggle}" IsChecked="True" Margin="16,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="Memory" GroupName="HistoryMetric" Tag="mem" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton Content="GPU" GroupName="HistoryMetric" Tag="gpu" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
+                                <RadioButton Content="FPS" GroupName="HistoryMetric" Tag="fps" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked"
+                                             ToolTip="Frames per second of the app in front — a game while you play it. Pick an app below to see its own. Per minute, the minute's lowest." />
                                 <RadioButton x:Name="HistoryMetricDisk" Content="Disk" GroupName="HistoryMetric" Tag="disk" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton x:Name="HistoryMetricNet" Content="Network" GroupName="HistoryMetric" Tag="net" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" />
                                 <RadioButton x:Name="HistoryMetricPower" Content="Power" GroupName="HistoryMetric" Tag="power" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="HistoryMetric_Checked" ToolTip="CPU + GPU power draw, W" />
@@ -360,6 +364,25 @@
                                         Click="HistoryAppClear_Click" ToolTip="Back to the whole PC" />
                             </StackPanel>
                         </DockPanel>
+                        <!-- On the Power chart: what the electricity in view cost -->
+                        <WrapPanel x:Name="EnergyPanel" DockPanel.Dock="Top" Margin="0,0,0,10" Visibility="Collapsed">
+                            <WrapPanel.Resources>
+                                <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                    <Setter Property="Padding" Value="4,1" />
+                                    <Setter Property="Margin" Value="4,0" />
+                                    <Setter Property="TextAlignment" Value="Center" />
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                </Style>
+                            </WrapPanel.Resources>
+                            <TextBlock Text="Electricity" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
+                            <TextBox x:Name="EnergyPriceBox" Width="60" TextChanged="EnergySetting_Changed" AutomationProperties.Name="Price per kilowatt-hour" />
+                            <TextBox x:Name="EnergyCurrencyBox" Width="50" MaxLength="8" TextChanged="EnergySetting_Changed" AutomationProperties.Name="Currency" />
+                            <TextBlock Text="per kWh, plus" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
+                            <TextBox x:Name="EnergyExtraBox" Width="50" TextChanged="EnergySetting_Changed" AutomationProperties.Name="Watts for the rest of the PC"
+                                     ToolTip="The sensors give only the CPU and GPU. Add what the rest takes — motherboard, memory, drives, fans, the power supply's loss: roughly 30–60 W on a desktop, 5–10 W on a laptop. The screen isn't counted." />
+                            <TextBlock Text="W for the rest of the PC" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                            <TextBlock x:Name="EnergyText" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </WrapPanel>
                         <!-- Chart over the app lists, split by a bar that resizes the lists (the height is remembered) -->
                         <Grid>
                             <Grid.RowDefinitions>
@@ -443,13 +466,46 @@
 
                 <TabItem Header="Disks">
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                        <ItemsControl x:Name="DiskCardsHost" Margin="16,16,4,4" VerticalAlignment="Top">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <UniformGrid Columns="2" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
+                        <StackPanel>
+                            <Border x:Name="DriveHealthPanel" Visibility="Collapsed" Margin="16,16,16,0" Padding="14,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource CaseLabel}" Tag="Drive health" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                    <ItemsControl x:Name="DriveHealthList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,5">
+                                                    <Border x:Name="Chip" DockPanel.Dock="Right" Padding="9,2" CornerRadius="{DynamicResource PillRadius}" BorderThickness="1" VerticalAlignment="Center"
+                                                            BorderBrush="{DynamicResource StatusGood}">
+                                                        <TextBlock x:Name="ChipText" Text="{Binding Note}" FontSize="11" Foreground="{DynamicResource StatusGood}" />
+                                                    </Border>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding Tag}" Value="warn">
+                                                        <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StatusWarn}" />
+                                                        <Setter TargetName="ChipText" Property="Foreground" Value="{DynamicResource StatusWarn}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Tag}" Value="bad">
+                                                        <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StatusBad}" />
+                                                        <Setter TargetName="ChipText" Property="Foreground" Value="{DynamicResource StatusBad}" />
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                            <ItemsControl x:Name="DiskCardsHost" Margin="16,16,4,4" VerticalAlignment="Top">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="2" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </StackPanel>
                     </ScrollViewer>
                 </TabItem>
 
@@ -1010,10 +1066,8 @@
                         <ToggleButton x:Name="LogToggle" Content="Log" Style="{StaticResource PillToggle}" IsChecked="False"
                                       ToolTip="Show or hide the log" AutomationProperties.Name="Show log" />
                         <TextBlock Style="{StaticResource CaseLabel}" Tag="Theme" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
-                        <RadioButton x:Name="ThemeGlass" Content="Glass" GroupName="Theme" Tag="Glass" Style="{StaticResource PillToggle}" Checked="Theme_Checked" />
-                        <RadioButton x:Name="ThemeStarTrek" Content="Star Trek" GroupName="Theme" Tag="StarTrek" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
-                        <RadioButton x:Name="ThemeStarCraft" Content="StarCraft" GroupName="Theme" Tag="StarCraft" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
-                        <RadioButton x:Name="ThemeCyberpunk" Content="Cyberpunk" GroupName="Theme" Tag="Cyberpunk" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="Theme_Checked" />
+                        <ComboBox x:Name="ThemeCombo" Width="190" VerticalAlignment="Center" AutomationProperties.Name="Theme"
+                                  ToolTip="Hover a theme in the list to try it on; click to keep it" />
                         <TextBlock Style="{StaticResource CaseLabel}" Tag="Showing" Foreground="{DynamicResource TextSecondary}" FontSize="11" VerticalAlignment="Center" Margin="24,0,8,0" />
                         <ComboBox x:Name="HistorySourceCombo" Width="150" VerticalAlignment="Center" SelectionChanged="HistorySource_Changed" AutomationProperties.Name="Which PC to show" ToolTip="This PC, or one added under About → Remote monitoring: Resources, Disks, Network, History and Events follow it" />
                     </StackPanel>

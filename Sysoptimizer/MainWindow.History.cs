@@ -78,8 +78,88 @@ public partial class MainWindow
     private bool _navDragging;
     private Border? _navSelection;
 
+    // --- electricity ---
+
+    private const string EnergyKey = @"Software\Sysoptimizer\Energy";
+    private double _kwhPrice = double.NaN, _extraWatts;
+    private string _currency = "";
+    private bool _energyLoading;
+
+    private void LoadEnergySettings()
+    {
+        _energyLoading = true;
+        using (var key = Registry.CurrentUser.OpenSubKey(EnergyKey))
+        {
+            EnergyPriceBox.Text = key?.GetValue("Price") as string ?? "";
+            EnergyCurrencyBox.Text = key?.GetValue("Currency") as string ?? "";
+            EnergyExtraBox.Text = (key?.GetValue("ExtraWatts") as int? ?? 0).ToString();
+        }
+        _energyLoading = false;
+        ReadEnergySettings(save: false);
+    }
+
+    private void EnergySetting_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (!_energyLoading && IsLoaded) { ReadEnergySettings(save: true); UpdateEnergyText(); }
+    }
+
+    /// <summary>Price with a decimal comma or point, whatever Windows' own format (0,80 or 0.80); a box that doesn't parse is marked and ignored.</summary>
+    private void ReadEnergySettings(bool save)
+    {
+        bool priceOk = double.TryParse(EnergyPriceBox.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double price) && price is >= 0 and < 1000;
+        bool extraOk = int.TryParse(EnergyExtraBox.Text.Trim(), out int extra) && extra is >= 0 and <= 2000;
+        foreach (var (box, ok) in new[] { (EnergyPriceBox, priceOk || EnergyPriceBox.Text.Trim().Length == 0), (EnergyExtraBox, extraOk) })
+        {
+            if (ok) box.ClearValue(Control.BorderBrushProperty); else box.SetResourceReference(Control.BorderBrushProperty, "StatusBad");
+        }
+        _kwhPrice = priceOk ? price : double.NaN;
+        if (extraOk) _extraWatts = extra;
+        _currency = EnergyCurrencyBox.Text.Trim();
+        if (!save) return;
+        using var key = Registry.CurrentUser.CreateSubKey(EnergyKey);
+        key.SetValue("Price", EnergyPriceBox.Text.Trim());
+        key.SetValue("Currency", _currency);
+        if (extraOk) key.SetValue("ExtraWatts", extra, RegistryValueKind.DWord);
+    }
+
+    /// <summary>
+    /// The energy the range on screen used: CPU + GPU watts, plus the rest of the PC as set, over the time it
+    /// was recorded (gaps — off or asleep — count nothing). From minute peaks on long ranges, so a little high.
+    /// </summary>
+    private (double Kwh, double Hours) RangeEnergy()
+    {
+        double joules = 0, seconds = 0;
+        var system = _hist.System;
+        for (int i = 1; i < system.Count; i++)
+        {
+            double dt = (system[i].Time - system[i - 1].Time).TotalSeconds;
+            if (dt <= 0 || dt > (_historyMinutely ? 150 : 5)) continue; // a gap: off, asleep, or not recording
+            float w = Raw(system[i], "power");
+            joules += ((float.IsNaN(w) ? 0 : w) + _extraWatts) * dt;
+            seconds += dt;
+        }
+        return (joules / 3.6e6, seconds / 3600);
+    }
+
+    private string Money(double amount) => $"{amount:0.00} {_currency}".Trim();
+
+    private void UpdateEnergyText()
+    {
+        EnergyPanel.Visibility = _historyMetric == "power" && _historyApp == null ? Visibility.Visible : Visibility.Collapsed;
+        if (EnergyPanel.Visibility != Visibility.Visible) return;
+        var (kwh, hours) = RangeEnergy();
+        if (hours <= 0) { EnergyText.Text = "Nothing recorded in this range."; return; }
+        string used = $"{kwh:0.##} kWh in the {hours:0.#} h recorded here" + (_historyMinutely ? " (from minute peaks, a little high)" : "");
+        if (double.IsNaN(_kwhPrice)) { EnergyText.Text = used + " — type a price to see the cost."; return; }
+        double cost = kwh * _kwhPrice;
+        // The pace of the range, kept up for 30 days: what a month like this costs.
+        double month = cost / Math.Max(1, (_historyTo - _historyFrom).TotalHours) * 24 * 30;
+        EnergyText.Text = $"{used}: {Money(cost)} · about {Money(month)} a month at this pace";
+    }
+
     private void InitHistory()
     {
+        LoadEnergySettings();
         using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
             HistoryStore.RetentionDays = key?.GetValue("RetentionDays") is int days ? days : 90;
         RetentionCombo.SelectedItem = RetentionCombo.Items.Cast<ComboBoxItem>()
@@ -205,6 +285,17 @@ public partial class MainWindow
             return;
         }
         HistoryRangeTitle.Text = $"TOP APPS IN THIS RANGE (AVERAGE {MetricLabel().ToUpperInvariant()})";
+        UpdateEnergyText();
+        if (ListMetric == "fps")
+        {
+            // Averaged over the moments each app drew, not the whole range: a game played for ten minutes
+            // of a day still reads its own frame rate. The low is the worst moment recorded.
+            HistoryRangeList.ItemsSource = _hist.Processes.Where(p => p.Fps >= 1).GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => (Name: g.Key, Avg: g.Average(p => p.Fps), Low: g.Min(p => p.Fps), Minutes: g.Count()))
+                .OrderByDescending(t => t.Minutes).Take(10)
+                .Select(t => new OptionItem { Name = t.Name, Description = $"lowest {t.Low:0} FPS", Note = $"{t.Avg:0} FPS" }).ToList();
+            return;
+        }
         if (ListMetric == "watts")
         {
             int snapshots = Math.Max(1, _hist.Processes.Select(p => p.Time).Distinct().Count());
@@ -215,7 +306,8 @@ public partial class MainWindow
                 {
                     Name = t.Name,
                     Description = $"CPU peak {t.PeakCpu:0}%" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
-                    Note = $"{t.Watts:0.0} W",
+                    // An app's share of the bill: its average watts over the hours recorded here.
+                    Note = $"{t.Watts:0.0} W" + (double.IsNaN(_kwhPrice) ? "" : $" · {Money(t.Watts * RangeEnergy().Hours / 1000 * _kwhPrice)}"),
                 }).ToList();
             return;
         }
@@ -313,7 +405,7 @@ public partial class MainWindow
     // On Power and Battery they rank by estimated watts, when the sensors gave the CPU or GPU draw.
     private bool SystemOnlyMetric => _historyMetric is "disk" or "net" or "power" or "fan" or "battery";
     private string ListMetric => _historyMetric is "power" or "battery" && _histWatts ? "watts" : SystemOnlyMetric ? "cpu" : _historyMetric;
-    private string MetricLabel() => ListMetric switch { "mem" => "Memory", "gpu" => "GPU", "watts" => "estimated power", _ => "CPU" };
+    private string MetricLabel() => ListMetric switch { "mem" => "Memory", "gpu" => "GPU", "watts" => "estimated power", "fps" => "FPS while drawing", _ => "CPU" };
 
     /// <summary>
     /// An app's estimated draw: the CPU's watts split by each app's share of the CPU use, the same for the GPU —
@@ -332,11 +424,11 @@ public partial class MainWindow
     private double _scale = 100;  // what the chart's full height stands for, in the metric's own unit
 
     /// <summary>Percent metrics fill a fixed 0-100 %; disk, network and an app's memory scale to what's on screen.</summary>
-    private bool InPercent => _historyApp == null ? IsPercentMetric(_historyMetric) : _historyMetric != "mem";
+    private bool InPercent => _historyApp == null ? IsPercentMetric(_historyMetric) : _historyMetric is "cpu" or "gpu";
     private static bool IsPercentMetric(string metric) => metric is "cpu" or "mem" or "gpu" or "battery";
     private static float Raw(SysSample s, string metric) => metric switch
     {
-        "mem" => s.Mem, "gpu" => s.Gpu, "disk" => s.DiskMBs, "net" => s.NetMbps, "fan" => s.FanRpm, "battery" => s.BatteryPct,
+        "mem" => s.Mem, "gpu" => s.Gpu, "disk" => s.DiskMBs, "net" => s.NetMbps, "fan" => s.FanRpm, "battery" => s.BatteryPct, "fps" => s.Fps,
         "power" => float.IsNaN(s.CpuWatts) ? s.GpuWatts : float.IsNaN(s.GpuWatts) ? s.CpuWatts : s.CpuWatts + s.GpuWatts,
         _ => s.Cpu,
     };
@@ -344,7 +436,7 @@ public partial class MainWindow
     private float Metric(SysSample s) => (float)(Raw(s, _historyMetric) / _scale * 100);
     private string FormatValue(double v) => InPercent
         ? (v < 10 ? $"{v:0.0}%" : $"{v:0}%")
-        : _historyMetric switch { "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", "power" => $"{v:0} W", "fan" => $"{v:0} RPM", _ => FormatMB(v) };
+        : _historyMetric switch { "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", "power" => $"{v:0} W", "fan" => $"{v:0} RPM", "fps" => $"{v:0} FPS", _ => FormatMB(v) };
 
     /// <summary>1, 2 or 5 × a power of ten, at least the value: a scale whose labels read cleanly.</summary>
     private static double NiceCeiling(double max)
@@ -366,13 +458,14 @@ public partial class MainWindow
         return _histProcTimes.Select(t =>
         {
             var p = _histProcs[t].Find(x => string.Equals(x.Name, app, StringComparison.OrdinalIgnoreCase));
-            return p.Name == null ? new SysSample(t, 0, 0, 0, float.NaN, float.NaN) : new SysSample(t, p.Cpu, p.RamMB, p.Gpu, float.NaN, float.NaN);
+            // Frames: no line where the app drew none (or wasn't recorded), rather than a drop to 0.
+            return p.Name == null ? new SysSample(t, 0, 0, 0, float.NaN, float.NaN) : new SysSample(t, p.Cpu, p.RamMB, p.Gpu, float.NaN, float.NaN, Fps: p.Fps);
         }).ToList();
     }
-    private float MetricTemp(SysSample s) => _historyMetric == "gpu" ? s.GpuTemp : s.CpuTemp;
+    private float MetricTemp(SysSample s) => _historyMetric is "gpu" or "fps" ? s.GpuTemp : s.CpuTemp;
 
     private Color ThemeColor(string key, Color fallback) => (TryFindResource(key) as SolidColorBrush)?.Color ?? fallback;
-    private Color MetricColor() => ThemeColor(_historyMetric switch { "mem" or "net" => "AccentMem", "gpu" => "AccentGpu", _ => "AccentCpu" }, Colors.SteelBlue);
+    private Color MetricColor() => ThemeColor(_historyMetric switch { "mem" or "net" => "AccentMem", "gpu" or "fps" => "AccentGpu", _ => "AccentCpu" }, Colors.SteelBlue);
     private static readonly Color Hot = Color.FromRgb(0xEF, 0x44, 0x44), Warm = Color.FromRgb(0xF9, 0x73, 0x16), Cool = Color.FromRgb(0x5B, 0x6B, 0xD8);
     private static Color Alpha(Color c, byte a) => Color.FromArgb(a, c.R, c.G, c.B);
 
@@ -410,11 +503,26 @@ public partial class MainWindow
 
         var samples = _historyApp == null ? _hist.System : AppSeries(_historyApp);
         _scale = InPercent ? 100 : NiceCeiling(samples.Select(x => Raw(x, _historyMetric)).Where(v => !float.IsNaN(v)).DefaultIfEmpty(0).Max());
+        if (_historyMetric == "fps")
+        {
+            _scale = Math.Max(30, _scale); // an idle scale of "1 FPS" says nothing
+            if (!samples.Any(x => Raw(x, "fps") >= 1))
+            {
+                var none = Label(_historyApp == null ? "No frames recorded here. FPS is recorded for the app in front while it draws — a game you play."
+                                                     : $"{_historyApp} drew no frames that were recorded here.", 12);
+                none.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                Place(c, none, (w - none.DesiredSize.Width) / 2, (top + bottom) / 2 - 10);
+            }
+        }
         foreach (var (v, text) in new[] { (100.0, FormatValue(_scale)), (50.0, FormatValue(_scale / 2)), (0.0, InPercent ? "0%" : "0") })
         {
-            var grid = new Line { X1 = 0, X2 = w, Y1 = Y(v), Y2 = Y(v), StrokeThickness = 1, Opacity = 0.15 };
-            grid.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
-            c.Children.Add(grid);
+            // Only the middle line, dashed: the top of the plot is 100% (or the scale's top) and its floor is 0.
+            if (v == 50)
+            {
+                var grid = new Line { X1 = 0, X2 = w, Y1 = Y(v), Y2 = Y(v), StrokeThickness = 1, Opacity = 0.18, StrokeDashArray = new DoubleCollection { 2, 4 } };
+                grid.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
+                c.Children.Add(grid);
+            }
             var label = Label(text, 9);
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Place(c, label, w - label.DesiredSize.Width - 6, Y(v) - (v == 100 ? -1 : 13));
@@ -459,10 +567,18 @@ public partial class MainWindow
             Data = SmoothRuns(peaks, cols, Y, baseline: null), Stroke = Heat(0xFF, 0xFF, 0xFF, 0xFF), StrokeThickness = 2,
             StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, IsHitTestVisible = false,
         };
-        linePath.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" or "net" => "LineGlowMem", "gpu" => "LineGlowGpu", _ => "LineGlowCpu" });
+        linePath.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" or "net" => "LineGlowMem", "gpu" or "fps" => "LineGlowGpu", _ => "LineGlowCpu" });
         c.Children.Add(areaPath);
         c.Children.Add(linePath);
         (_chartPeaks, _chartWidth, _chartY, _chartCols) = (peaks, w, Y, cols);
+        // The newest reading on screen gets a glowing dot, like the live graphs: where the line ends, it's "now".
+        int lastCol = Array.FindLastIndex(peaks, v => !float.IsNaN(v));
+        if (lastCol >= 0)
+        {
+            var endDot = new Ellipse { Width = 8, Height = 8, Fill = new SolidColorBrush(accent), IsHitTestVisible = false };
+            endDot.SetResourceReference(UIElement.EffectProperty, _historyMetric switch { "mem" or "net" => "LineGlowMem", "gpu" or "fps" => "LineGlowGpu", _ => "LineGlowCpu" });
+            Place(c, endDot, Math.Min(cols.Center(lastCol), w - 5) - 4, Y(peaks[lastCol]) - 4);
+        }
         if (_animateChart && samples.Count > 0)
         {
             // A new range or metric eases in; drag frames and live ticks redraw in place, unanimated.
@@ -1013,11 +1129,11 @@ public partial class MainWindow
             {
                 Name = p.Name,
                 Description = FormatMB(p.RamMB) + (p.Gpu >= 1 ? $" · GPU {p.Gpu:0}%" : ""),
-                Note = ListMetric == "watts" ? $"{WattsOf(p):0.0} W" : $"{p.Cpu:0.0}% CPU",
+                Note = ListMetric switch { "watts" => $"{WattsOf(p):0.0} W", "fps" when p.Fps >= 1 => $"{p.Fps:0} FPS", _ => $"{p.Cpu:0.0}% CPU" },
             }).ToList();
     }
 
-    private float MetricOf(ProcSample p) => ListMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, "watts" => WattsOf(p), _ => p.Cpu };
+    private float MetricOf(ProcSample p) => ListMetric switch { "mem" => p.RamMB, "gpu" => p.Gpu, "watts" => WattsOf(p), "fps" => float.IsNaN(p.Fps) ? 0 : p.Fps, _ => p.Cpu };
 
     private void EnsureProcessIndex()
     {
@@ -1076,7 +1192,7 @@ public partial class MainWindow
         var rows = (StackPanel)_cursorValue!.Child;
         rows.Children.Clear();
         bool mem = ListMetric == "mem";
-        string Amount(float v) => mem ? FormatMB(v) : ListMetric == "watts" ? $"{v:0.0} W" : v < 10 ? $"{v:0.0}%" : $"{v:0}%";
+        string Amount(float v) => mem ? FormatMB(v) : ListMetric == "watts" ? $"{v:0.0} W" : ListMetric == "fps" ? $"{v:0} FPS" : v < 10 ? $"{v:0.0}%" : $"{v:0}%";
         double raw = value * _scale / 100;
 
         rows.Children.Add(CardRow(time.ToLocalTime().ToString(_historyMinutely ? "ddd d MMM HH:mm" : "ddd d MMM HH:mm:ss"),
@@ -1408,13 +1524,13 @@ public partial class MainWindow
         string When(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
 
         var system = new System.Text.StringBuilder();
-        system.AppendLine(string.Join(sep, "Time", "CPU %", "Memory %", "GPU %", "CPU °C", "GPU °C", "Disk MB/s", "Network Mbps", "CPU W", "GPU W", "Fan RPM", "Battery %"));
+        system.AppendLine(string.Join(sep, "Time", "CPU %", "Memory %", "GPU %", "CPU °C", "GPU °C", "Disk MB/s", "Network Mbps", "CPU W", "GPU W", "Fan RPM", "Battery %", "FPS"));
         foreach (var x in _hist.System)
-            system.AppendLine(string.Join(sep, When(x.Time), N(x.Cpu), N(x.Mem), N(x.Gpu), N(x.CpuTemp), N(x.GpuTemp), N(x.DiskMBs), N(x.NetMbps), N(x.CpuWatts), N(x.GpuWatts), N(x.FanRpm), N(x.BatteryPct)));
+            system.AppendLine(string.Join(sep, When(x.Time), N(x.Cpu), N(x.Mem), N(x.Gpu), N(x.CpuTemp), N(x.GpuTemp), N(x.DiskMBs), N(x.NetMbps), N(x.CpuWatts), N(x.GpuWatts), N(x.FanRpm), N(x.BatteryPct), N(x.Fps)));
         var apps = new System.Text.StringBuilder();
-        apps.AppendLine(string.Join(sep, "Time", "App", "CPU %", "Memory MB", "GPU %"));
+        apps.AppendLine(string.Join(sep, "Time", "App", "CPU %", "Memory MB", "GPU %", "FPS"));
         foreach (var p in _hist.Processes)
-            apps.AppendLine(string.Join(sep, When(p.Time), Csv(p.Name), N(p.Cpu), N(p.RamMB), N(p.Gpu)));
+            apps.AppendLine(string.Join(sep, When(p.Time), Csv(p.Name), N(p.Cpu), N(p.RamMB), N(p.Gpu), N(p.Fps)));
 
         string appsPath = System.IO.Path.ChangeExtension(dialog.FileName, null) + " - apps.csv";
         try

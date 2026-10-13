@@ -10,7 +10,8 @@ public sealed record ReportPart(string Name, HistoryData? Week, List<Boot>? Boot
 /// <summary>The weekly report: a self-contained HTML page, one section per PC.</summary>
 public static class ReportService
 {
-    public static string Html(DateTime from, DateTime to, IEnumerable<ReportPart> parts)
+    /// <param name="price">Price per kWh, NaN if none was set; <paramref name="extraWatts"/> stands for the parts the sensors don't see.</param>
+    public static string Html(DateTime from, DateTime to, IEnumerable<ReportPart> parts, double price = double.NaN, string currency = "", double extraWatts = 0)
     {
         var html = new StringBuilder();
         string E(string s) => WebUtility.HtmlEncode(s);
@@ -49,6 +50,10 @@ public static class ReportService
                 Row("CPU temperature", s => s.CpuTemp, " °C");
                 Row("GPU temperature", s => s.GpuTemp, " °C");
                 Row("Power (CPU + GPU)", s => float.IsNaN(s.CpuWatts) ? s.GpuWatts : float.IsNaN(s.GpuWatts) ? s.CpuWatts : s.CpuWatts + s.GpuWatts, " W");
+                // One summary row per recorded minute: its power (a peak, so this runs a little high) for 60 s.
+                double kwh = week.System.Sum(s => (float.IsNaN(s.CpuWatts) ? 0 : s.CpuWatts) + (float.IsNaN(s.GpuWatts) ? 0 : s.GpuWatts) + extraWatts) * 60 / 3.6e6;
+                if (kwh > 0)
+                    html.Append($"<tr><td>Energy, about</td><td></td><td class=\"n\">{kwh:0.#} kWh{(double.IsNaN(price) ? "" : $" ≈ {kwh * price:0.00} {E(currency)}")}</td></tr>");
                 var battery = week.System.Select(s => s.BatteryPct).Where(v => !float.IsNaN(v)).ToList();
                 if (battery.Count > 0) html.Append($"<tr><td>Battery, lowest</td><td></td><td class=\"n\">{battery.Min():0}%</td></tr>");
                 html.Append("</table>");

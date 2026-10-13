@@ -32,6 +32,19 @@ public class DriveSpace
     public double TotalGB { get; set; }
 }
 
+/// <summary>One drive's health: its own SMART / NVMe figures, and Windows' verdict on it.</summary>
+public class DriveHealth
+{
+    public string Name { get; set; } = "";
+    public double TempC { get; set; } = double.NaN;
+    public double WarnTempC { get; set; } = double.NaN;       // NVMe drives say where their own warning starts
+    public double LifePercent { get; set; } = double.NaN;     // SSDs: life left, 100 = new
+    public bool SpareBelowThreshold { get; set; }             // NVMe: out of spare blocks — the drive's own alarm
+    public double PowerOnHours { get; set; } = double.NaN;
+    public double WrittenTB { get; set; } = double.NaN;
+    public string? WindowsHealth { get; set; }                // Healthy, Warning, Unhealthy, Unknown; null if not known
+}
+
 /// <summary>A laptop's battery; absent on a desktop.</summary>
 public class BatteryReading
 {
@@ -55,6 +68,9 @@ public class ResourceSnapshot
     public List<FanReading> Fans { get; set; } = new();
     public BatteryReading? Battery { get; set; }
     public Dictionary<int, double> GpuByPid { get; set; } = new();
+    public Dictionary<int, double> FpsByPid { get; set; } = new();
+    public double Fps { get; set; } = double.NaN; // the app in front, when it draws frames (a game)
+    public string? FpsApp { get; set; }
     public double MemUsedGB { get; set; }
     public double MemTotalGB { get; set; }
     public double MemPercent { get; set; }
@@ -64,4 +80,5 @@ public class ResourceSnapshot
     public List<DiskSnapshot> Disks { get; set; } = new();
     public List<NetSnapshot> Nets { get; set; } = new();
     public List<DriveSpace> Drives { get; set; } = new(); // fixed drives' free space, read every 30 s
+    public List<DriveHealth> DriveHealth { get; set; } = new(); // read every minute
 }

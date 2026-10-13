@@ -48,6 +48,13 @@ public static class ThemeManager
         new("StarTrek", "Star Trek", true, (0x000000, 0x0099FF, 0x0099FF)),
         new("StarCraft", "StarCraft", true, (0x120B07, 0xE6DDCF, 0x4D3A26)),
         new("Cyberpunk", "Cyberpunk", true, (0x0E0A0A, 0xDAE9EC, 0x0AEEFC)), // title in TextPrimary, like the caption buttons beside it
+        new("Fallout", "Fallout", true, (0x060A03, 0x80FF1A, 0x2E4A1B)),
+        new("Diablo", "Diablo", true, (0x07080B, 0xB6D6E6, 0x1D2B3E)),
+        new("MassEffect", "Mass Effect", true, (0x120B07, 0xF0E4D6, 0x48331F)),
+        new("Halo", "Halo", true, (0x0D0804, 0xFFF3DD, 0x4A3417)),
+        new("Matrix", "Matrix", false, (0x000000, 0x41FF00, 0x1A3D0F)),
+        new("Witcher", "Witcher", false, (0x0C0D0E, 0xD0E0E8, 0x2C343A)),
+        new("Starfield", "Starfield", true, (0x18130F, 0xF5F1EE, 0x40342B)),
     };
 
     public static ThemeInfo Current { get; private set; } = Themes[0];

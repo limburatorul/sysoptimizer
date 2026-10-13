@@ -71,13 +71,13 @@
 
     <!-- Type and line weight -->
     <FontFamily x:Key="UiFont">Segoe UI Variable, Segoe UI</FontFamily>
-    <sys:Double x:Key="GraphStroke">1.5</sys:Double>
+    <sys:Double x:Key="GraphStroke">1.8</sys:Double>
 
-    <!-- Glow — a faint bloom in each line's own color, kept quiet like native Windows 11 charts -->
+    <!-- Glow — a bloom in each line's own color -->
     <DropShadowEffect x:Key="LineGlow" Color="#4EA8FF" BlurRadius="8" ShadowDepth="0" Opacity="0.35" />
-    <DropShadowEffect x:Key="LineGlowCpu" Color="#4EA8FF" BlurRadius="10" ShadowDepth="0" Opacity="0.45" />
-    <DropShadowEffect x:Key="LineGlowMem" Color="#A78BFA" BlurRadius="10" ShadowDepth="0" Opacity="0.45" />
-    <DropShadowEffect x:Key="LineGlowGpu" Color="#FBBF24" BlurRadius="10" ShadowDepth="0" Opacity="0.45" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#4EA8FF" BlurRadius="16" ShadowDepth="0" Opacity="0.85" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#A78BFA" BlurRadius="16" ShadowDepth="0" Opacity="0.85" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#FBBF24" BlurRadius="16" ShadowDepth="0" Opacity="0.85" />
 
     <!-- Area under each curve -->
     <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">

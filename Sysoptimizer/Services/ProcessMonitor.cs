@@ -6,7 +6,7 @@ using System.Text;
 namespace Sysoptimizer.Services;
 
 /// <param name="Cpu">Share of the whole machine, like Task Manager (0–100 across all cores).</param>
-public sealed record ProcessUsage(string Name, int Instances, double Cpu, double RamMB, double Gpu, string? Path, string? Description, string? Company);
+public sealed record ProcessUsage(string Name, int Instances, double Cpu, double RamMB, double Gpu, string? Path, string? Description, string? Company, double Fps = 0);
 
 /// <summary>Per-app usage, every instance of an executable rolled into one row (chrome × 30 → one "chrome").</summary>
 public sealed class ProcessMonitor
@@ -27,12 +27,12 @@ public sealed class ProcessMonitor
     private readonly Dictionary<int, string?> _paths = new();
     private readonly Dictionary<string, (string? Description, string? Company)> _info = new(StringComparer.OrdinalIgnoreCase);
 
-    public List<ProcessUsage> Sample(IReadOnlyDictionary<int, double> gpuByPid)
+    public List<ProcessUsage> Sample(IReadOnlyDictionary<int, double> gpuByPid, IReadOnlyDictionary<int, double> fpsByPid)
     {
         var now = DateTime.UtcNow;
         double elapsed = Math.Max(0.001, (now - _lastAt).TotalSeconds);
         var cpuNow = new Dictionary<int, TimeSpan>();
-        var groups = new Dictionary<string, (int Count, double Cpu, double Ram, double Gpu, string? Path)>(StringComparer.OrdinalIgnoreCase);
+        var groups = new Dictionary<string, (int Count, double Cpu, double Ram, double Gpu, string? Path, double Fps)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var p in Process.GetProcesses())
         {
@@ -54,7 +54,8 @@ public sealed class ProcessMonitor
 
                 string name = p.ProcessName;
                 var g = groups.GetValueOrDefault(name);
-                groups[name] = (g.Count + 1, g.Cpu + cpu, g.Ram + ram, g.Gpu + gpuByPid.GetValueOrDefault(p.Id), g.Path ?? PathOf(p.Id));
+                // Frames don't add up across an app's processes: its rate is its busiest window's.
+                groups[name] = (g.Count + 1, g.Cpu + cpu, g.Ram + ram, g.Gpu + gpuByPid.GetValueOrDefault(p.Id), g.Path ?? PathOf(p.Id), Math.Max(g.Fps, fpsByPid.GetValueOrDefault(p.Id)));
             }
         }
 
@@ -65,7 +66,7 @@ public sealed class ProcessMonitor
         return groups.Select(kv =>
         {
             var (description, company) = kv.Value.Path is { } path ? InfoOf(path) : (null, null);
-            return new ProcessUsage(kv.Key, kv.Value.Count, Math.Min(100, kv.Value.Cpu), kv.Value.Ram, Math.Min(100, kv.Value.Gpu), kv.Value.Path, description, company);
+            return new ProcessUsage(kv.Key, kv.Value.Count, Math.Min(100, kv.Value.Cpu), kv.Value.Ram, Math.Min(100, kv.Value.Gpu), kv.Value.Path, description, company, kv.Value.Fps);
         }).ToList();
     }
 
@@ -103,5 +104,6 @@ public sealed class ProcessMonitor
         all.OrderByDescending(p => p.Cpu).Take(8).Where(p => p.Cpu >= 0.5)
            .Concat(all.OrderByDescending(p => p.RamMB).Take(5))
            .Concat(all.OrderByDescending(p => p.Gpu).Take(5).Where(p => p.Gpu >= 0.5))
+           .Concat(all.OrderByDescending(p => p.Fps).Take(3).Where(p => p.Fps >= 1))
            .DistinctBy(p => p.Name).ToList();
 }
