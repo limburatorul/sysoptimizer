@@ -909,24 +909,44 @@ public partial class MainWindow : Window
     private async void SearchApps_Click(object sender, RoutedEventArgs e)
     {
         string query = InstallSearchBox.Text.Trim();
-        _appItems.Clear();
-        if (query.Length == 0)
-        {
-            foreach (var a in WingetService.PopularApps) _appItems.Add(new OptionItem { Name = a.Name, Tag = a.Id });
-            InstallSearchStatus.Text = "Popular apps";
-            return;
-        }
+        if (query.Length == 0) { ShowPopularApps(); return; }
+        int search = ++_appSearch;
         InstallSearchButton.IsEnabled = false;
         InstallSearchStatus.Text = $"Searching for “{query}”…";
         try
         {
             var found = await Task.Run(() => WingetService.Search(query));
+            if (search != _appSearch) return; // cleared, or searched again, meanwhile
+            _appItems.Clear();
             foreach (var r in found.Where(r => RemoteCommand.IsWingetId(r.Id)))
                 _appItems.Add(new OptionItem { Name = r.Name, Description = $"{r.Id} · {r.Version}", Tag = r.Id });
-            InstallSearchStatus.Text = found.Count == 0 ? $"Nothing found for “{query}”." : $"{found.Count} found for “{query}” — clear the search for the popular list.";
+            InstallSearchStatus.Text = found.Count == 0 ? $"Nothing found for “{query}”." : $"{found.Count} found for “{query}”.";
+            InstallClearButton.Visibility = Visibility.Visible;
         }
         catch (System.ComponentModel.Win32Exception) { InstallSearchStatus.Text = "winget isn't installed — get “App Installer” from the Microsoft Store."; }
         finally { InstallSearchButton.IsEnabled = true; }
+    }
+
+    private int _appSearch; // the latest search; an older one finishing late is dropped
+
+    private void ShowPopularApps()
+    {
+        _appSearch++;
+        _appItems.Clear();
+        foreach (var a in WingetService.PopularApps) _appItems.Add(new OptionItem { Name = a.Name, Tag = a.Id });
+        InstallSearchStatus.Text = "Popular apps";
+        InstallClearButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void ClearAppSearch_Click(object sender, RoutedEventArgs e)
+    {
+        InstallSearchBox.Clear(); // its TextChanged brings the popular list back
+        InstallSearchBox.Focus();
+    }
+
+    private void InstallSearch_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        if (IsLoaded && InstallSearchBox.Text.Trim().Length == 0 && InstallSearchStatus.Text != "Popular apps") ShowPopularApps(); // also drops a search still running
     }
 
     private async void UpgradeAll_Click(object sender, RoutedEventArgs e)

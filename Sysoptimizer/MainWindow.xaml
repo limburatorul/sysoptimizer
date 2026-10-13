@@ -732,8 +732,10 @@
                                 <DockPanel Margin="16">
                                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                                         <TextBox x:Name="InstallSearchBox" DockPanel.Dock="Left" Width="260" VerticalContentAlignment="Center" MaxLength="100" AutomationProperties.Name="Search the winget catalog"
-                                                 ToolTip="Search every app winget can install; empty = the popular list" KeyDown="InstallSearch_KeyDown" />
+                                                 ToolTip="Search every app winget can install; empty = the popular list" KeyDown="InstallSearch_KeyDown" TextChanged="InstallSearch_TextChanged" />
                                         <Button x:Name="InstallSearchButton" DockPanel.Dock="Left" Content="Search" Margin="8,0,0,0" Click="SearchApps_Click" />
+                                        <Button x:Name="InstallClearButton" DockPanel.Dock="Left" Content="Clear" Margin="8,0,0,0" Click="ClearAppSearch_Click" Visibility="Collapsed"
+                                                ToolTip="Back to the popular apps" />
                                         <TextBlock x:Name="InstallSearchStatus" Text="Popular apps" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                     </DockPanel>
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
