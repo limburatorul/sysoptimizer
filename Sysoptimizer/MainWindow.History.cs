@@ -692,6 +692,7 @@ public partial class MainWindow
 
         DrawTemperatureBand(c, h - TempBand / 2 - 3, cols, bridge);
         DrawLaunchBadges(c, X, w, bottom);
+        DrawChanges(c, X, w, bottom);
 
         // By the range on screen, not the saved setting: mid-drag the view is in the past while it says "follow now".
         if (DateTime.Now >= _historyFrom && DateTime.Now <= _historyTo.AddSeconds(30))
@@ -950,6 +951,51 @@ public partial class MainWindow
             AutomationPropertiesName(badge, $"{g.Count} apps launched");
             badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Place(c, badge, gx - badge.DesiredSize.Width / 2, 2);
+        }
+    }
+
+    /// <summary>The kinds of change the History chart marks, with their icon and how the list names them.</summary>
+    internal static readonly Dictionary<string, (string Glyph, string Label)> ChangeKinds = new()
+    {
+        ["installed"] = ("\uE896", "Installed"), ["removed"] = ("\uE74D", "Removed"), ["updated"] = ("\uE777", "Updated"),
+        ["update"] = ("\uE777", "Windows update"), ["driver"] = ("\uE772", "Driver"),
+    };
+
+    /// <summary>
+    /// Changes to the PC — apps installed, removed or updated, Windows updates, drivers — as small tags at the
+    /// foot of the chart with a dashed line up through the curve: so "it's been slower since Tuesday" meets
+    /// what was installed on Tuesday. Hover a tag for the list; close ones share a tag.
+    /// </summary>
+    private void DrawChanges(Canvas c, Func<DateTime, double> x, double w, double bottom)
+    {
+        var groups = new List<List<HistoryEvent>>();
+        foreach (var e in _hist.Events.Where(e => ChangeKinds.ContainsKey(e.Kind)).OrderBy(e => e.Time))
+        {
+            if (groups.Count == 0 || x(e.Time) - x(groups[^1][0].Time) > 30) groups.Add(new());
+            groups[^1].Add(e);
+        }
+        foreach (var g in groups)
+        {
+            double gx = Math.Clamp(x(g[0].Time), 14, w - 14);
+            var line = new Line { X1 = gx, X2 = gx, Y1 = BadgeRow, Y2 = bottom - 20, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 2, 3 }, Opacity = 0.5, IsHitTestVisible = false };
+            line.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "TextSecondary");
+            c.Children.Add(line);
+            var icons = new TextBlock { Text = string.Concat(g.Select(e => ChangeKinds[e.Kind].Glyph).Distinct().Take(3)), FontFamily = new FontFamily(IconFont), FontSize = 11 };
+            icons.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
+            var content = new StackPanel { Orientation = Orientation.Horizontal };
+            content.Children.Add(icons);
+            if (g.Count > 1) content.Children.Add(new TextBlock { Text = $" {g.Count}", FontSize = 10, VerticalAlignment = VerticalAlignment.Center });
+            var tag = new Border
+            {
+                Padding = new Thickness(5, 2, 5, 2), BorderThickness = new Thickness(1), Child = content,
+                ToolTip = string.Join("\n", g.Take(20).Select(e => $"{e.Time.ToLocalTime():ddd HH:mm}  {ChangeKinds[e.Kind].Label}: {e.Detail}")) + (g.Count > 20 ? $"\n… and {g.Count - 20} more" : ""),
+            };
+            tag.SetResourceReference(Border.BackgroundProperty, "SurfaceElevated");
+            tag.SetResourceReference(Border.BorderBrushProperty, "ButtonBorder");
+            tag.SetResourceReference(Border.CornerRadiusProperty, "PillRadius");
+            AutomationPropertiesName(tag, g.Count == 1 ? $"{ChangeKinds[g[0].Kind].Label}: {g[0].Detail}" : $"{g.Count} changes to the PC");
+            tag.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Place(c, tag, gx - tag.DesiredSize.Width / 2, bottom - tag.DesiredSize.Height - 2);
         }
     }
 

@@ -57,6 +57,7 @@ public partial class MainWindow
             "start" => ("Sysoptimizer started", long.TryParse(e.Detail, out long boot)
                 ? $"PC booted {DateTimeOffset.FromUnixTimeSeconds(boot).LocalDateTime:ddd d MMM HH:mm}" : "Recording"),
             "alert" => (e.Detail, "Alert"),
+            _ when ChangeKinds.TryGetValue(e.Kind, out var change) => (e.Detail, change.Label),
             _ => (e.Detail, e.Kind),
         };
         return new OptionItem

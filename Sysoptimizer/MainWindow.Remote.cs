@@ -183,12 +183,13 @@ public partial class MainWindow
         catch (IOException ex) { return "!" + ex.Message; }
     }
 
-    /// <summary>/startup, /services and /boots: the lists the Optimize tab shows, as this PC has them.</summary>
+    /// <summary>/startup, /services and /boots: the lists the Optimize tab shows, as this PC has them; /log: the end of its log file.</summary>
     private static byte[]? RemoteList(string name) => name switch
     {
         "startup" => JsonSerializer.SerializeToUtf8Bytes(StartupService.GetItems()),
         "services" => JsonSerializer.SerializeToUtf8Bytes(ServiceManager.KnownServices.ToDictionary(s => s.Key, s => ServiceManager.GetStatus(s.Key))),
         "boots" => JsonSerializer.SerializeToUtf8Bytes(BootService.Read()),
+        "log" => System.Text.Encoding.UTF8.GetBytes(AppLog.Tail()),
         _ => null,
     };
 
@@ -301,12 +302,12 @@ public partial class MainWindow
     }
 
     /// <summary>A watching PC lists a folder (name null) or copies a file from it — announced here, like a command.</summary>
-    private byte[]? ShareFile(string? folder, string? name)
+    private byte[]? ShareFile(string? folder, string? path, string? name)
     {
-        if (name == null) return RemoteFiles.List(folder);
-        if (RemoteFiles.FileOf(folder, name) is not { } path) return null;
+        if (name == null) return RemoteFiles.List(folder, path);
+        if (RemoteFiles.FileOf(folder, name) is not { } file) return null;
         Dispatcher.Invoke(() => Alert($"remote:{Guid.NewGuid()}", $"A watching PC is copying {name} from {folder}"));
-        try { return File.ReadAllBytes(path); }
+        try { return File.ReadAllBytes(file); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; } // in use, or gone meanwhile
     }
 
@@ -483,6 +484,12 @@ public partial class MainWindow
             get.Click += (_, _) => GetFiles(targets[0]);
             menu.Items.Add(get);
         }
+        if (targets.Count == 1)
+        {
+            var log = new MenuItem { Header = "Its log…", ToolTip = "What Sysoptimizer did on that PC, and any error or crash — from its log file" };
+            log.Click += (_, _) => ShowLog(targets[0]);
+            menu.Items.Add(log);
+        }
         menu.Items.Add(new Separator());
         bool wakeable = targets.Any(t => t.Macs.Length > 0);
         var wake = new MenuItem { Header = "Wake up", IsEnabled = wakeable,
@@ -494,67 +501,182 @@ public partial class MainWindow
         menu.IsOpen = true;
     }
 
+    /// <summary>A window in the app's theme: its colors, its title bar, the acrylic backdrop.</summary>
+    private Window ThemedWindow(string title, UIElement content, double width)
+    {
+        var card = new Border { Padding = new Thickness(16), Child = content };
+        card.SetResourceReference(Border.BackgroundProperty, "Surface");
+        var window = new Window
+        {
+            Title = title, Owner = this, Width = width, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = System.Windows.Media.Brushes.Transparent, Content = card,
+        };
+        window.SetResourceReference(Window.ForegroundProperty, "TextPrimary");
+        window.SourceInitialized += (_, _) => WindowGlass.EnableAcrylic(window);
+        return window;
+    }
+
+    // --- transfers: every file on its way, with what it's doing, how far, how fast and how long is left ---
+
+    private Window? _transfersWindow;
+    private StackPanel? _transferRows;
+
+    private TransferRow NewTransfer(string title)
+    {
+        if (_transfersWindow == null)
+        {
+            _transferRows = new StackPanel();
+            var scroll = new ScrollViewer { Content = _transferRows, MaxHeight = 520 };
+            scroll.SetResourceReference(StyleProperty, "GlassScrollViewer");
+            _transfersWindow = ThemedWindow("Transfers", scroll, 560);
+            _transfersWindow.Closed += (_, _) => (_transfersWindow, _transferRows) = (null, null);
+            _transfersWindow.Show();
+        }
+        var row = new TransferRow(title, Dispatcher);
+        _transferRows!.Children.Insert(0, row.View); // newest on top
+        return row;
+    }
+
     /// <summary>
-    /// A small window over the watched PC's Downloads, Desktop or Documents: pick files, and they're copied to
-    /// this PC's Downloads (saved like a received file: never over one, marked as from another computer).
+    /// A window over the watched PC's Downloads, Desktop or Documents and the folders in them: open folders,
+    /// filter by name, pick files, and they're copied to this PC's Downloads (saved like a received file:
+    /// never over one, marked as from another computer), each followed in Transfers.
     /// </summary>
     private void GetFiles(RemoteHistory target)
     {
-        var folder = new ComboBox { ItemsSource = RemoteFiles.Folders, SelectedIndex = 0, Width = 160, Margin = new Thickness(0, 0, 0, 10), HorizontalAlignment = HorizontalAlignment.Left };
+        string sub = ""; // the folder open inside the chosen one, "a/b"
+        var entries = new List<RemoteFiles.Entry>();
+        var folder = new ComboBox { ItemsSource = RemoteFiles.Folders, SelectedIndex = 0, Width = 150 };
         System.Windows.Automation.AutomationProperties.SetName(folder, "Folder");
+        var up = new Button { Content = "\uE74A", FontFamily = new System.Windows.Media.FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), Margin = new Thickness(8, 0, 0, 0), IsEnabled = false, ToolTip = "Up one folder" };
+        System.Windows.Automation.AutomationProperties.SetName(up, "Up one folder");
+        var search = new TextBox { Width = 200, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Show only names containing this" };
+        System.Windows.Automation.AutomationProperties.SetName(search, "Filter by name");
+        var where = new TextBlock { Margin = new Thickness(0, 8, 0, 8), TextTrimming = TextTrimming.CharacterEllipsis };
+        where.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
         var list = new ListBox { SelectionMode = SelectionMode.Extended, Height = 380, Background = System.Windows.Media.Brushes.Transparent };
         list.SetResourceReference(Control.ForegroundProperty, "TextPrimary");
         list.SetResourceReference(Control.BorderBrushProperty, "Border");
-        System.Windows.Automation.AutomationProperties.SetName(list, "Files");
+        System.Windows.Automation.AutomationProperties.SetName(list, "Files and folders");
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
         status.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
         var copy = new Button { Content = "Copy to my Downloads", Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, IsEnabled = false };
         copy.SetResourceReference(StyleProperty, "PrimaryButton");
-        var panel = new DockPanel { Margin = new Thickness(16) };
-        foreach (var (element, dock) in new (UIElement, Dock)[] { (folder, Dock.Top), (copy, Dock.Bottom), (status, Dock.Bottom) })
+
+        var bar = new DockPanel();
+        DockPanel.SetDock(search, Dock.Right);
+        bar.Children.Add(search);
+        var left = new StackPanel { Orientation = Orientation.Horizontal };
+        left.Children.Add(folder);
+        left.Children.Add(up);
+        bar.Children.Add(left);
+        var panel = new DockPanel();
+        foreach (var (element, dock) in new (UIElement, Dock)[] { (bar, Dock.Top), (where, Dock.Top), (copy, Dock.Bottom), (status, Dock.Bottom) })
         {
             DockPanel.SetDock(element, dock);
             panel.Children.Add(element);
         }
         panel.Children.Add(list);
-        var window = new Window { Title = $"Files on {target.Name}", Owner = this, Width = 600, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel };
-        window.SetResourceReference(BackgroundProperty, "Surface");
+        var window = ThemedWindow($"Files on {target.Name}", panel, 640);
+
+        string FolderName() => (string)folder.SelectedItem;
+        string PathOf(string name) => sub.Length == 0 ? name : $"{sub}/{name}";
+
+        void Fill()
+        {
+            list.Items.Clear();
+            string filter = search.Text.Trim();
+            var shown = entries.Where(e => filter.Length == 0 || e.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).ToList();
+            foreach (var e in shown)
+            {
+                var icon = new TextBlock { Text = e.Folder ? "\uE8B7" : "\uE8A5", FontFamily = new System.Windows.Media.FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+                var detail = new TextBlock { Text = e.Folder ? "  folder" : $"  {CleanupService.FormatSize(e.Bytes)} · {e.Modified.ToLocalTime():d MMM yyyy HH:mm}", Opacity = 0.65 };
+                var line = new StackPanel { Orientation = Orientation.Horizontal };
+                line.Children.Add(icon);
+                line.Children.Add(new TextBlock { Text = e.Name });
+                line.Children.Add(detail);
+                var item = new ListBoxItem { Content = line, Tag = e };
+                System.Windows.Automation.AutomationProperties.SetName(item, e.Folder ? $"Folder {e.Name}" : e.Name);
+                list.Items.Add(item);
+            }
+            int files = shown.Count(e => !e.Folder), folders = shown.Count - files;
+            status.Text = shown.Count == 0 ? (entries.Count == 0 ? "Nothing here." : "Nothing matches the filter.")
+                : $"{folders} folders, {files} files. Open a folder with a double-click or Enter; pick files with Ctrl or Shift.";
+        }
 
         async Task Load()
         {
-            string name = (string)folder.SelectedItem;
-            status.Text = $"Reading {name} on {target.Name}…";
+            where.Text = $"{target.Name} › {FolderName()}" + (sub.Length > 0 ? " › " + sub.Replace("/", " › ") : "");
+            up.IsEnabled = sub.Length > 0;
+            status.Text = "Reading…";
             list.Items.Clear();
-            try
-            {
-                var files = await Task.Run(() => target.Files(name));
-                foreach (var f in files)
-                    list.Items.Add(new ListBoxItem { Content = $"{f.Name}   ·   {CleanupService.FormatSize(f.Bytes)}   ·   {f.Modified.ToLocalTime():d MMM yyyy HH:mm}", Tag = f });
-                status.Text = files.Count == 0 ? "No files here." : $"{files.Count} files, newest first. Pick one or more (Ctrl or Shift for several).";
-            }
-            catch (RemoteHistoryException ex) { status.Text = $"Can't read it — {ex.Message}"; }
+            try { entries = await Task.Run(() => target.Files(FolderName(), sub)); }
+            catch (RemoteHistoryException ex) { entries = new(); status.Text = $"Can't read it — {ex.Message}"; return; }
+            Fill();
         }
-        folder.SelectionChanged += async (_, _) => await Load();
-        list.SelectionChanged += (_, _) => copy.IsEnabled = list.SelectedItems.Count > 0;
+
+        void Open()
+        {
+            if (list.SelectedItem is ListBoxItem { Tag: RemoteFiles.Entry { Folder: true } e }) { sub = PathOf(e.Name); search.Clear(); _ = Load(); }
+        }
+
+        folder.SelectionChanged += async (_, _) => { sub = ""; await Load(); };
+        up.Click += async (_, _) => { sub = sub.Contains('/') ? sub[..sub.LastIndexOf('/')] : ""; search.Clear(); await Load(); };
+        search.TextChanged += (_, _) => Fill();
+        list.MouseDoubleClick += (_, _) => Open();
+        list.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { Open(); e.Handled = true; } };
+        list.SelectionChanged += (_, _) => copy.IsEnabled = list.SelectedItems.Cast<ListBoxItem>().Any(i => i.Tag is RemoteFiles.Entry { Folder: false });
         copy.Click += async (_, _) =>
         {
-            string name = (string)folder.SelectedItem;
-            var picked = list.SelectedItems.Cast<ListBoxItem>().Select(i => (RemoteFiles.Entry)i.Tag).ToList();
-            copy.IsEnabled = false;
-            foreach (var f in picked)
+            string from = FolderName();
+            var picked = list.SelectedItems.Cast<ListBoxItem>().Select(i => (RemoteFiles.Entry)i.Tag).Where(f => !f.Folder).Select(f => (f.Name, Path: PathOf(f.Name))).ToList();
+            foreach (var (name, path) in picked)
             {
-                status.Text = $"Copying {f.Name} ({CleanupService.FormatSize(f.Bytes)})…";
+                var row = NewTransfer($"{name}  ←  {target.Name}");
+                row.Phase($"Asking {target.Name} for it…");
                 try
                 {
-                    var bytes = await Task.Run(() => target.CopyFile(name, f.Name));
-                    string saved = await Task.Run(() => SaveReceived(f.Name, bytes, out var output) ? output : "couldn't save it — " + output);
-                    Log($"{f.Name} from {target.Name}: {saved}");
-                    status.Text = $"{f.Name}: {saved}";
+                    var bytes = await Task.Run(() => target.CopyFile(from, path, (done, total) => row.Progress(done, total, "Receiving")));
+                    row.Phase("Saving…");
+                    var (ok, output) = await Task.Run(() => (SaveReceived(name, bytes, out var o), o));
+                    row.Done(ok ? $"Done — {output}" : $"Failed — couldn't save it: {output}", ok);
+                    Log($"{name} from {target.Name}: {output}");
                 }
-                catch (RemoteHistoryException ex) { Log($"{f.Name} from {target.Name}: {ex.Message}"); status.Text = $"{f.Name}: {ex.Message}"; }
+                catch (RemoteHistoryException ex) { row.Done($"Failed — {ex.Message}", false); Log($"{name} from {target.Name}: {ex.Message}"); }
             }
-            copy.IsEnabled = list.SelectedItems.Count > 0;
         };
+        window.Show();
+        _ = Load();
+    }
+
+    /// <summary>The end of a watched PC's log file, newest at the bottom, with a Refresh.</summary>
+    private void ShowLog(RemoteHistory target)
+    {
+        var text = new TextBox
+        {
+            IsReadOnly = true, Height = 460, FontFamily = new System.Windows.Media.FontFamily("Cascadia Mono, Consolas"), FontSize = 12,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, TextWrapping = TextWrapping.NoWrap,
+        };
+        System.Windows.Automation.AutomationProperties.SetName(text, $"{target.Name}'s log");
+        var refresh = new Button { Content = "Refresh", Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        var panel = new DockPanel();
+        DockPanel.SetDock(refresh, Dock.Bottom);
+        panel.Children.Add(refresh);
+        panel.Children.Add(text);
+        var window = ThemedWindow($"Log of {target.Name}", panel, 900);
+        async Task Load()
+        {
+            refresh.IsEnabled = false;
+            try
+            {
+                string log = await Task.Run(() => target.List("log"));
+                text.Text = log.Length == 0 ? "The log is empty." : log;
+            }
+            catch (RemoteHistoryException ex) { text.Text = $"Can't read it — {ex.Message}"; }
+            text.ScrollToEnd();
+            refresh.IsEnabled = true;
+        }
+        refresh.Click += async (_, _) => await Load();
         window.Show();
         _ = Load();
     }
@@ -573,7 +695,10 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    /// <summary>One file at a time, to each PC at once: a file is read whole and sealed in memory, up to 512 MB.</summary>
+    /// <summary>
+    /// One file at a time, to each PC at once, each followed in Transfers: read, packed and encrypted (whole, in
+    /// memory — up to 512 MB), sent, then saved there.
+    /// </summary>
     private async Task SendFiles(List<RemoteHistory> targets, IEnumerable<string> paths)
     {
         foreach (string path in paths)
@@ -581,14 +706,33 @@ public partial class MainWindow
             string name = Path.GetFileName(path);
             if (Directory.Exists(path)) { Log($"{name} is a folder — send the files in it, or a .zip of it."); continue; }
             if (RemoteCommand.PlainFileName(name) == null) { Log($"{name}: Windows can't save it under that name (or it's over 128 characters) — rename it first."); continue; }
+            var rows = targets.Select(t => (Target: t, Row: NewTransfer($"{name}  →  {t.Name}"))).ToList();
+            rows.ForEach(r => r.Row.Phase("Reading the file…"));
             byte[] bytes;
             try
             {
-                if (new FileInfo(path).Length > RemoteCommand.MaxFileBytes) { Log($"{name} is over 512 MB — too big to send."); continue; }
+                if (new FileInfo(path).Length > RemoteCommand.MaxFileBytes) { rows.ForEach(r => r.Row.Done("Not sent — it's over 512 MB.", false)); continue; }
                 bytes = await File.ReadAllBytesAsync(path);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log($"{name}: couldn't read it — {ex.Message}"); continue; }
-            await Task.WhenAll(targets.Select(target => RunOn(target, $"Sending {name}", t => t.Run("receive-file", name, "", bytes))));
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { rows.ForEach(r => r.Row.Done($"Not sent — couldn't read it: {ex.Message}", false)); continue; }
+            await Task.WhenAll(rows.Select(async r =>
+            {
+                r.Row.Phase("Packing and encrypting…");
+                try
+                {
+                    string answer = await Task.Run(() => r.Target.Run("receive-file", name, "", bytes, (done, total) =>
+                    {
+                        r.Row.Progress(done, total, "Sending");
+                        if (done == total) r.Row.Phase($"Saving on {r.Target.Name}…");
+                    }));
+                    int split = answer.IndexOf('\n');
+                    string detail = LastLine(split < 0 ? "" : answer[(split + 1)..]);
+                    bool ok = answer.StartsWith("ok");
+                    r.Row.Done(ok ? $"Done — {detail} on {r.Target.Name}" : $"Failed — {detail}", ok);
+                    Log($"Sending {name} to {r.Target.Name}: {(ok ? detail : "failed — " + detail)}");
+                }
+                catch (RemoteHistoryException ex) { r.Row.Done($"Failed — {ex.Message}", false); Log($"Sending {name} to {r.Target.Name}: {ex.Message}."); }
+            }));
         }
     }
 
@@ -711,6 +855,8 @@ public partial class MainWindow
         RemoteInstallPanel.Visibility = source == null ? Visibility.Collapsed : Visibility.Visible;
         InstallSelectedButton.Content = source == null ? "Install selected" : $"Install selected on {source.Name}";
         foreach (var card in _pcCards) card.Shown = card.Name == source?.Name;
+        InsightsCard.Visibility = Visibility.Collapsed; // the other PC's week takes a moment to arrive
+        RefreshInsights();
         _remoteProcesses = new();
         _processRows.Clear();
         _processRowMap.Clear();
@@ -741,3 +887,61 @@ public sealed class PcCard : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
+
+/// <summary>One file on its way to or from a watched PC, in the Transfers window. Updated from any thread.</summary>
+internal sealed class TransferRow
+{
+    public readonly Border View;
+    private readonly TextBlock _detail;
+    private readonly ProgressBar _bar;
+    private readonly System.Windows.Threading.Dispatcher _ui;
+    private readonly Stopwatch _clock = new();
+    private long _shownAt = -1000;
+
+    public TransferRow(string title, System.Windows.Threading.Dispatcher ui)
+    {
+        _ui = ui;
+        var name = new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+        _bar = new ProgressBar { Height = 6, Margin = new Thickness(0, 6, 0, 4), Maximum = 100, IsIndeterminate = true };
+        _bar.SetResourceReference(Control.ForegroundProperty, "Accent");
+        _bar.SetResourceReference(Control.BackgroundProperty, "PillBackground");
+        _bar.BorderThickness = new Thickness(0);
+        System.Windows.Automation.AutomationProperties.SetName(_bar, title);
+        _detail = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        _detail.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
+        var stack = new StackPanel();
+        stack.Children.Add(name);
+        stack.Children.Add(_bar);
+        stack.Children.Add(_detail);
+        View = new Border { Child = stack, Padding = new Thickness(0, 8, 0, 10), BorderThickness = new Thickness(0, 0, 0, 1) };
+        View.SetResourceReference(Border.BorderBrushProperty, "Border");
+    }
+
+    /// <summary>A step with no measure of its own (reading, encrypting, saving): the bar just moves.</summary>
+    public void Phase(string text) => _ui.InvokeAsync(() => { _bar.IsIndeterminate = true; _detail.Text = text; });
+
+    /// <summary>Bytes on the wire: percent, amount, speed and time left, shown ten times a second at most.</summary>
+    public void Progress(long done, long total, string verb)
+    {
+        if (!_clock.IsRunning) _clock.Start();
+        long now = _clock.ElapsedMilliseconds;
+        if (done < total && now - _shownAt < 100) return;
+        _shownAt = now;
+        double speed = done / Math.Max(0.05, _clock.Elapsed.TotalSeconds), percent = total > 0 ? 100.0 * done / total : 0;
+        string left = done < total && speed > 0 ? $" · {Left((total - done) / speed)} left" : "";
+        string text = $"{verb} — {percent:0}% · {CleanupService.FormatSize(done)} of {CleanupService.FormatSize(total)} · {CleanupService.FormatSize((long)speed)}/s{left}";
+        _ui.InvokeAsync(() => { _bar.IsIndeterminate = false; _bar.Value = percent; _detail.Text = text; });
+    }
+
+    public void Done(string text, bool ok) => _ui.InvokeAsync(() =>
+    {
+        _bar.IsIndeterminate = false;
+        _bar.Value = 100;
+        _bar.SetResourceReference(Control.ForegroundProperty, ok ? "StatusGood" : "StatusBad");
+        _detail.Text = text + (_clock.IsRunning ? $" ({Left(_clock.Elapsed.TotalSeconds)})" : "");
+        _detail.SetResourceReference(TextBlock.ForegroundProperty, ok ? "TextSecondary" : "StatusBad");
+    });
+
+    private static string Left(double seconds) => seconds < 60 ? $"{Math.Max(1, seconds):0} s" : $"{(int)(seconds / 60)} min {seconds % 60:0} s";
+}
+

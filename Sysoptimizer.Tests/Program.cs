@@ -26,6 +26,7 @@ foreach (var old in Directory.GetDirectories(Path.GetTempPath(), "sysoptimizer-s
 string folder = Path.Combine(Path.GetTempPath(), "sysoptimizer-selftest-" + Guid.NewGuid().ToString("N")); // never a leftover from an earlier run
 Directory.CreateDirectory(folder);
 HistoryStore.Folder = folder;
+AppLog.File = Path.Combine(folder, "test.log");
 HistoryStore.RetentionDays = 30;
 
 try
@@ -59,6 +60,49 @@ try
     Check(day1.System.Count == 1 && day2.System.Count == 2 && day3.System.Count == 3 && day3.System[^1].Cpu == 21,
         "today: appended lines read once, a half-written line waits for its end");
     Check(day3.Events.Select(e => e.Detail).SequenceEqual(new[] { "late", "notepad" }), "today: a late-stamped line lands in time order");
+
+    // The log file: lines kept in order, a message's own line breaks indented under it, the tail in whole lines.
+    AppLog.Write("first");
+    AppLog.Write("Crash: boom\n   at Somewhere()");
+    var log = AppLog.Tail();
+    Check(log.Contains(" first\n") && log.Contains(" Crash: boom\n       at Somewhere()\n") && log.IndexOf("first") < log.IndexOf("Crash"), "log: written in order, a stack trace kept under its line");
+    var tail = AppLog.Tail(30);
+    Check(tail.Length <= 30 && tail.Length > 0 && log.Contains("\n" + tail), "log: the tail is whole lines from the end");
+
+    // What changed on the PC: apps that appeared, went or changed version; the list kept between runs.
+    ChangeService.Folder = folder;
+    Check(ChangeService.Load("apps-test.txt") == null, "changes: the first look finds no list from before");
+    ChangeService.Save("apps-test.txt", new Dictionary<string, string> { ["7-Zip"] = "24.08", ["Old Tool"] = "1.0", ["Steam"] = "" });
+    var seen = ChangeService.Load("apps-test.txt")!;
+    var changes = ChangeService.Diff(seen, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["7-zip"] = "24.09", ["Steam"] = "", ["VLC"] = "3.0.21" });
+    Check(changes.SequenceEqual(new[] { ("updated", "7-zip 24.08 → 24.09"), ("installed", "VLC 3.0.21"), ("removed", "Old Tool 1.0") }),
+        "changes: installed, updated and removed apps, nothing for one that stayed the same: " + string.Join("; ", changes));
+
+    // What a week says: memory short for two hours a day, a 5 GB app, an app busy all week, slower starts.
+    {
+        var nowUtc = DateTime.UtcNow;
+        var week = new HistoryData(new(), new(), new());
+        for (int mins = 0; mins < 7 * 24 * 60; mins += 5) // a reading every five minutes is plenty here
+        {
+            var t = nowUtc.AddDays(-7).AddMinutes(mins);
+            bool full = mins % (24 * 60) < 600; // the first 10 hours of each day
+            week.System.Add(new SysSample(t, 20, full ? 92 : 50, 5, 60, 40));
+            week.Processes.Add(new ProcSample(t, "updater", 8, 100, 0));
+            if (mins % 30 == 0) week.Processes.Add(new ProcSample(t, "editor", 3, 5200, 0));
+            if (full) week.Processes.Add(new ProcSample(t, "browser", 4, 9000, 0));
+        }
+        var boots = new List<Boot>
+        {
+            new(nowUtc.AddDays(-1), 75, 30, 10, new() { new("NewSync", 20) }), new(nowUtc.AddDays(-3), 65, 30, 10, new()),
+            new(nowUtc.AddDays(-9), 40, 25, 10, new() { new("OldThing", 5) }), new(nowUtc.AddDays(-11), 44, 25, 10, new()),
+        };
+        var said = InsightService.From(week, boots, nowUtc);
+        Check(said.Any(x => x.StartsWith("Memory was over 85%") && x.Contains("browser")), "insights: memory running short, and who held it: " + said.FirstOrDefault());
+        Check(said.Any(x => x.StartsWith("browser held 8.8 GB")) && said.Any(x => x.StartsWith("editor held 5.1 GB")), "insights: the apps that hold gigabytes");
+        Check(said.Any(x => x.StartsWith("updater kept about 8% of the CPU busy")), "insights: an app busy all week");
+        Check(said.Any(x => x.Contains("longer than the week before") && x.Contains("NewSync") && !x.Contains("OldThing")), "insights: Windows starting slower, and what's new holding it up");
+        Check(InsightService.From(new HistoryData(new(), new(), new()), new(), nowUtc).Count == 0, "insights: nothing to say about nothing");
+    }
 
     // 2. A finished day written by hand: an old 7-field line, a new 9-field one, a torn line, junk.
     var yesterday = DateTime.Today.AddDays(-1);
@@ -166,11 +210,13 @@ try
     string FakeRun(RemoteCommand c) { lock (commands) commands.Add(c); return "ok\ndone"; }
     var salt = RemoteCrypto.NewSalt();
     DateTime energyFrom = default, energyTo = default;
+    var bigFile = System.Security.Cryptography.RandomNumberGenerator.GetBytes(3 << 20); // random: gzip can't shrink it, so the progress has megabytes to report
     using (new HistoryServer(port, key, salt, () => "{\"CpuPercent\":42}"u8.ToArray(), () => "[{\"Name\":\"app\"}]"u8.ToArray(),
         (from, to) => { (energyFrom, energyTo) = (from, to); return "chrome\t1.5"; }, FakeRun, name => name == "startup" ? "[\"startup list\"]"u8.ToArray() : null,
-        (folder, name) => folder != "Downloads" ? null
-            : name == null ? System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new[] { new RemoteFiles.Entry("a b.txt", 3, DateTime.UtcNow) })
-            : name == "a b.txt" ? "abc"u8.ToArray() : null, host: "localhost"))
+        (folder, path, name) => folder != "Downloads" ? null
+            : name == null ? System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(path == "photos"
+                ? new[] { new RemoteFiles.Entry("a b.txt", 3, DateTime.UtcNow) } : new[] { new RemoteFiles.Entry("photos", 0, DateTime.UtcNow, Folder: true) })
+            : name == "photos/a b.txt" ? bigFile : null, host: "localhost"))
     {
         var client = new RemoteHistory("test", "localhost", port, key);
         Check(client.Hello() == Environment.MachineName, "remote: the server says who it is");
@@ -189,10 +235,18 @@ try
         Check(second.System.Count == first.System.Count + 1, "remote: only new lines added, none twice");
         Check(second.Events.Any(e => e.Detail == "late-app"), "remote: a launch written late isn't skipped");
         Check(client.ReadDay(DateTime.Today.AddDays(-1), minutes: true).System.Count == 1, "remote: a finished day's minute summary arrives");
-        Check(client.Files("Downloads") is [{ Name: "a b.txt", Bytes: 3 }] && client.CopyFile("Downloads", "a b.txt").SequenceEqual("abc"u8.ToArray()),
-            "files: a folder's list and a file's copy arrive");
+        long heard = 0, of = 0;
+        Check(client.Files("Downloads") is [{ Name: "photos", Folder: true }] && client.Files("Downloads", "photos") is [{ Name: "a b.txt", Bytes: 3 }]
+              && client.CopyFile("Downloads", "photos/a b.txt", (done, total) => (heard, of) = (done, total)).SequenceEqual(bigFile),
+            "files: a folder, a subfolder's list and a file's copy arrive");
+        Check(of > 0 && heard == of, $"files: the download's progress is heard to the end ({heard} of {of})");
+        long sent = 0, sentOf = 0;
+        client.Run("receive-file", "big.bin", "", bigFile, (done, total) => (sent, sentOf) = (done, total));
+        Check(sentOf > 1 << 20 && sent == sentOf && commands[^1].File!.SequenceEqual(bigFile), $"files: the upload's progress is heard to the end, the file intact ({sent} of {sentOf})");
         try { client.Files("Windows"); Check(false, "files: only the three folders"); }
         catch (RemoteHistoryException) { Check(true, "files: only the three folders"); }
+        Check(RemoteFiles.FileOf("Downloads", "../secret.txt") == null && RemoteFiles.FileOf("Downloads", "a/./b.txt") == null && RemoteFiles.List("Downloads", "..") == null
+              && RemoteFiles.List("Downloads", "no such folder " + Guid.NewGuid()) == null, "files: no way out of the three folders");
         Check(RemoteFiles.FileOf("Downloads", @"..\secret.txt") == null && RemoteFiles.FileOf("Downloads", "NUL") == null && RemoteFiles.FileOf("System32", "x.dll") == null
               && RemoteFiles.FileOf("Downloads", "no such file " + Guid.NewGuid() + ".txt") == null, "files: no paths, device names, other folders or missing files");
 

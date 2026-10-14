@@ -16,6 +16,9 @@
     <Compile Include="..\Sysoptimizer\Services\EnergyService.cs" Link="EnergyService.cs" />
     <Compile Include="..\Sysoptimizer\Services\WingetService.cs" Link="WingetService.cs" />
     <Compile Include="..\Sysoptimizer\Services\PhoneServer.cs" Link="PhoneServer.cs" />
+    <Compile Include="..\Sysoptimizer\Services\AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="..\Sysoptimizer\Services\ChangeService.cs" Link="ChangeService.cs" />
+    <Compile Include="..\Sysoptimizer\Services\InsightService.cs" Link="InsightService.cs" />
   </ItemGroup>
 
 </Project>

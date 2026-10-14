@@ -153,14 +153,14 @@ public sealed record RemoteCommand(string Action, string? Target, byte[]? File, 
 }
 
 /// <summary>
-/// The folders a watcher may list and copy files from: the signed-in user's Downloads, Desktop and Documents —
-/// their files only, not subfolders, nothing hidden, no links leading elsewhere.
+/// The folders a watcher may list and copy files from: the signed-in user's Downloads, Desktop and Documents,
+/// and the folders inside them — nothing hidden or system, no links leading elsewhere, no ".." out of them.
 /// </summary>
 public static class RemoteFiles
 {
     public static readonly string[] Folders = { "Downloads", "Desktop", "Documents" };
 
-    public sealed record Entry(string Name, long Bytes, DateTime Modified);
+    public sealed record Entry(string Name, long Bytes, DateTime Modified, bool Folder = false);
 
     public static string? PathOf(string? folder) => folder switch
     {
@@ -170,26 +170,48 @@ public static class RemoteFiles
         _ => null,
     };
 
-    private static bool Plain(FileInfo f) =>
+    private static bool Plain(FileSystemInfo f) =>
         (f.Attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) == 0 && RemoteCommand.PlainFileName(f.Name) != null;
 
-    /// <summary>The folder's files, newest first (500 at most), as JSON; null for a folder that isn't one of the three.</summary>
-    public static byte[]? List(string? folder)
+    /// <summary>
+    /// A folder inside one of the three, from a "sub/dir" path: each part a plain name, each step a real folder
+    /// that isn't hidden, system or a link. Null when the path isn't allowed.
+    /// </summary>
+    private static string? Inside(string? folder, string? path)
     {
         if (PathOf(folder) is not { } dir) return null;
-        var files = Directory.Exists(dir)
-            ? new DirectoryInfo(dir).EnumerateFiles().Where(Plain).OrderByDescending(f => f.LastWriteTimeUtc).Take(500)
-                .Select(f => new Entry(f.Name, f.Length, f.LastWriteTimeUtc)).ToList()
-            : new List<Entry>();
-        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(files);
+        foreach (var part in (path ?? "").Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (RemoteCommand.PlainFileName(part) == null) return null; // also refuses "." and "..": a name can't end with a dot
+            var step = new DirectoryInfo(Path.Combine(dir, part));
+            if (!step.Exists || !Plain(step)) return null;
+            dir = step.FullName;
+        }
+        return dir;
     }
 
-    /// <summary>The full path of a file a watcher may copy, or null: a bare name, right in one of the three folders, up to 512 MB.</summary>
+    /// <summary>A folder's subfolders (by name) then its files (newest first), 1,000 at most, as JSON; null if not allowed.</summary>
+    public static byte[]? List(string? folder, string? path = null)
+    {
+        if (Inside(folder, path) is not { } dir) return null;
+        var entries = Directory.Exists(dir)
+            ? new DirectoryInfo(dir).EnumerateDirectories().Where(Plain).OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(d => new Entry(d.Name, 0, d.LastWriteTimeUtc, Folder: true))
+                .Concat(new DirectoryInfo(dir).EnumerateFiles().Where(Plain).OrderByDescending(f => f.LastWriteTimeUtc)
+                    .Select(f => new Entry(f.Name, f.Length, f.LastWriteTimeUtc)))
+                .Take(1000).ToList()
+            : new List<Entry>();
+        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(entries);
+    }
+
+    /// <summary>The full path of a file a watcher may copy ("sub/dir/name"), or null: inside the three folders, up to 512 MB.</summary>
     public static string? FileOf(string? folder, string? name)
     {
-        if (PathOf(folder) is not { } dir || RemoteCommand.PlainFileName(name) == null) return null;
-        var file = new FileInfo(Path.Combine(dir, name!));
-        return file.Exists && Plain(file) && file.Length <= RemoteCommand.MaxFileBytes ? file.FullName : null;
+        if (name == null) return null;
+        int slash = name.LastIndexOf('/');
+        if (Inside(folder, slash < 0 ? "" : name[..slash]) is not { } dir || RemoteCommand.PlainFileName(name[(slash + 1)..]) is not { } file) return null;
+        var info = new FileInfo(Path.Combine(dir, file));
+        return info.Exists && Plain(info) && info.Length <= RemoteCommand.MaxFileBytes ? info.FullName : null;
     }
 }
 
@@ -209,7 +231,7 @@ public sealed class HistoryServer : IDisposable
     private readonly Func<DateTime, DateTime, string>? _energy;
     private readonly Func<string, byte[]?>? _lists;
     private readonly Func<RemoteCommand, string>? _run;
-    private readonly Func<string?, string?, byte[]?>? _files;
+    private readonly Func<string?, string?, string?, byte[]?>? _files;
     private readonly Dictionary<string, DateTime> _ran = new(); // commands already run, by signature
     private readonly object _runGate = new();                   // one at a time
 
@@ -219,11 +241,11 @@ public sealed class HistoryServer : IDisposable
     /// <param name="energy">Windows' energy figures per app between two UTC times, one "app\tWh" line each.</param>
     /// <param name="run">Runs a command and returns its outcome ("ok"/"failed" line, then details).</param>
     /// <param name="lists">Any other list the app keeps, by endpoint name (startup, services, boots), serialized; null = none.</param>
-    /// <param name="files">A folder's file list (name null), or a file's bytes, for a watcher copying files; null = refused.</param>
+    /// <param name="files">(folder, path, name): a folder's list (name null), or a file's bytes, for a watcher copying files; null = refused.</param>
     /// <param name="host">"+" = every address (needs admin — the app always runs elevated); the self-test uses localhost.</param>
     public HistoryServer(int port, byte[] key, byte[]? salt = null, Func<byte[]?>? live = null, Func<byte[]?>? processes = null,
         Func<DateTime, DateTime, string>? energy = null, Func<RemoteCommand, string>? run = null, Func<string, byte[]?>? lists = null,
-        Func<string?, string?, byte[]?>? files = null, string host = "+")
+        Func<string?, string?, string?, byte[]?>? files = null, string host = "+")
     {
         (_key, _salt, _live, _processes, _energy, _run, _lists, _files) = (key, salt, live, processes, energy, run, lists, files);
         _listener.Prefixes.Add($"http://{host}:{port}{Prefix}");
@@ -285,7 +307,7 @@ public sealed class HistoryServer : IDisposable
                 : endpoint.EndsWith("/live") ? _live?.Invoke()
                 : endpoint.EndsWith("/procs") ? _processes?.Invoke()
                 : endpoint.EndsWith("/energy") ? Energy(request.QueryString)
-                : endpoint.EndsWith("/files") ? _files?.Invoke(request.QueryString["folder"], request.QueryString["name"])
+                : endpoint.EndsWith("/files") ? _files?.Invoke(request.QueryString["folder"], request.QueryString["path"], request.QueryString["name"])
                 : Answer(endpoint, request.QueryString) ?? _lists?.Invoke(endpoint[(endpoint.LastIndexOf('/') + 1)..]);
             if (body == null) { response.StatusCode = 400; return; }
             var sealedBody = RemoteCrypto.Seal(_key, $"{path}\n{time}", body);
@@ -484,18 +506,20 @@ public sealed class RemoteHistory
     /// Asks the PC to do something (see <see cref="RemoteCommand"/>); returns its "ok"/"failed" line and details.
     /// A file to upload (an installer, or one to drop in Downloads) goes in <paramref name="file"/>.
     /// </summary>
-    public string Run(string what, string? target = null, string args = "", byte[]? file = null) =>
-        Send(HttpMethod.Post, $"do?what={what}" + (target != null ? $"&target={Uri.EscapeDataString(target)}" : "")
+    /// <param name="progress">For an upload: (bytes sent, bytes in all), as they go.</param>
+    public string Run(string what, string? target = null, string args = "", byte[]? file = null, Action<long, long>? progress = null) =>
+        Encoding.UTF8.GetString(SendBytes(HttpMethod.Post, $"do?what={what}" + (target != null ? $"&target={Uri.EscapeDataString(target)}" : "")
             + (args.Length > 0 ? $"&args={Uri.EscapeDataString(args)}" : "")
-            + $"&n={Guid.NewGuid():N}", file, SlowHttp); // so the same command twice in a second isn't taken for a replay
+            + $"&n={Guid.NewGuid():N}", file, SlowHttp, progress)); // the nonce: the same command twice in a second isn't taken for a replay
 
     /// <summary>The files in one of its <see cref="RemoteFiles.Folders"/>, newest first (JSON of <see cref="RemoteFiles.Entry"/>).</summary>
-    public List<RemoteFiles.Entry> Files(string folder) =>
-        System.Text.Json.JsonSerializer.Deserialize<List<RemoteFiles.Entry>>(Get($"files?folder={Uri.EscapeDataString(folder)}")) ?? new();
+    public List<RemoteFiles.Entry> Files(string folder, string path = "") =>
+        System.Text.Json.JsonSerializer.Deserialize<List<RemoteFiles.Entry>>(
+            Get($"files?folder={Uri.EscapeDataString(folder)}&path={Uri.EscapeDataString(path)}")) ?? new();
 
-    /// <summary>A copy of one of those files.</summary>
-    public byte[] CopyFile(string folder, string name) =>
-        SendBytes(HttpMethod.Get, $"files?folder={Uri.EscapeDataString(folder)}&name={Uri.EscapeDataString(name)}", null, SlowHttp);
+    /// <summary>A copy of one of those files ("sub/dir/name"); <paramref name="progress"/> hears (bytes received, bytes in all).</summary>
+    public byte[] CopyFile(string folder, string name, Action<long, long>? progress = null) =>
+        SendBytes(HttpMethod.Get, $"files?folder={Uri.EscapeDataString(folder)}&name={Uri.EscapeDataString(name)}", null, SlowHttp, progress);
 
     /// <summary>The PC's running apps, as its Processes tab lists them (JSON).</summary>
     public string Processes() => Get("procs");
@@ -598,16 +622,39 @@ public sealed class RemoteHistory
     private string Send(HttpMethod method, string relative, byte[]? upload, HttpClient http) =>
         Encoding.UTF8.GetString(SendBytes(method, relative, upload, http));
 
-    private byte[] SendBytes(HttpMethod method, string relative, byte[]? upload, HttpClient http)
+    /// <summary>An upload's body, written a megabyte at a time so its progress can be followed.</summary>
+    private sealed class ProgressContent(byte[] data, Action<long, long> progress) : HttpContent
+    {
+        protected override void SerializeToStream(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+        {
+            for (int at = 0; at < data.Length; at += 1 << 20)
+            {
+                int count = Math.Min(1 << 20, data.Length - at);
+                stream.Write(data, at, count);
+                progress(at + count, data.Length);
+            }
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            Task.Run(() => SerializeToStream(stream, context, CancellationToken.None));
+
+        protected override bool TryComputeLength(out long length) { length = data.Length; return true; }
+    }
+
+    private byte[] SendBytes(HttpMethod method, string relative, byte[]? upload, HttpClient http, Action<long, long>? progress = null)
     {
         string path = HistoryServer.Prefix + relative;
         long time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         using var request = new HttpRequestMessage(method, $"http://{Address}:{Port}{path}");
         request.Headers.Add("X-Time", time.ToString(CultureInfo.InvariantCulture));
         request.Headers.Add("X-Auth", RemoteCrypto.Sign(_key, path, time));
-        if (upload != null) request.Content = new ByteArrayContent(RemoteCrypto.Seal(_key, $"upload\n{path}\n{time}", upload));
+        if (upload != null)
+        {
+            var sealedUpload = RemoteCrypto.Seal(_key, $"upload\n{path}\n{time}", upload);
+            request.Content = progress != null ? new ProgressContent(sealedUpload, progress) : new ByteArrayContent(sealedUpload);
+        }
         HttpResponseMessage response;
-        try { response = http.Send(request); }
+        try { response = http.Send(request, HttpCompletionOption.ResponseHeadersRead); }
         catch (HttpRequestException ex) { throw new RemoteHistoryException($"can't reach {Address}:{Port} — {ex.Message}"); }
         catch (TaskCanceledException) { throw new RemoteHistoryException($"{Address}:{Port} didn't answer in time"); }
         using (response)
@@ -618,7 +665,19 @@ public sealed class RemoteHistory
                 throw new RemoteHistoryException("refused — it runs an older Sysoptimizer that can't do this (update it there), or the request was malformed");
             if (!response.IsSuccessStatusCode) throw new RemoteHistoryException($"answered {(int)response.StatusCode} {response.ReasonPhrase}");
             using var body = new MemoryStream();
-            response.Content.ReadAsStream().CopyTo(body);
+            try
+            {
+                using var stream = response.Content.ReadAsStream();
+                long total = response.Content.Headers.ContentLength ?? -1;
+                var buffer = new byte[1 << 16];
+                for (int read; (read = stream.Read(buffer)) > 0;)
+                {
+                    body.Write(buffer, 0, read);
+                    if (upload == null && total > 0) progress?.Invoke(body.Length, total);
+                }
+            }
+            catch (IOException ex) { throw new RemoteHistoryException($"the connection to {Address} broke off — {ex.Message}"); }
+            catch (TaskCanceledException) { throw new RemoteHistoryException($"{Address}:{Port} stopped sending in time"); }
             try { return RemoteCrypto.Open(_key, $"{path}\n{time}", body.ToArray()); }
             catch (CryptographicException) { throw new RemoteHistoryException("sent an answer that doesn't check out (wrong key, or altered on the way)"); }
         }

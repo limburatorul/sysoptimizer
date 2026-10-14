@@ -224,7 +224,14 @@ public partial class MainWindow : Window
         link.Inlines.Add(new System.Windows.Documents.Run(text));
     }
 
-    private void Log(string message) => LogText.Text += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
+    private void Log(string message)
+    {
+        AppLog.Write(message);
+        string text = LogText.Text + $"[{DateTime.Now:HH:mm:ss}] {message}\n";
+        // Days of messages in one TextBlock made each new line slower to add and lay out: the panel keeps the
+        // last few hundred lines; the log file keeps them all.
+        LogText.Text = text.Length > 40_000 ? text[(text.IndexOf('\n', text.Length - 30_000) + 1)..] : text;
+    }
 
     private static string FormatUptime(double seconds)
     {
@@ -1264,6 +1271,7 @@ public partial class MainWindow : Window
     {
         WindowGlass.ApplyChrome(this);
         if (_updateDialog != null) WindowGlass.ApplyChrome(_updateDialog); // modeless: it can be open across a switch
+        foreach (Window owned in OwnedWindows) WindowGlass.ApplyChrome(owned); // Transfers, Files on…, a PC's log
         // The corner radius is a resource reference; wait for it to settle before re-cutting the clips.
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => _clipUpdaters.ForEach(update => update()));
     }

@@ -65,6 +65,74 @@ public partial class MainWindow
         Closed += (_, _) => _tray?.Dispose();
     }
 
+    private int _insightsTicket;
+
+    /// <summary>
+    /// The "From the last 7 days" card for the PC being shown: its week at one row per minute and its Windows
+    /// starts, read and weighed off the UI thread (a watched PC's over the network).
+    /// </summary>
+    private void RefreshInsights()
+    {
+        int ticket = ++_insightsTicket;
+        var source = _source;
+        var now = DateTime.Now;
+        Task.Run(() =>
+        {
+            var week = source != null ? source.ReadMinutes(now.AddDays(-7), now) : HistoryStore.ReadMinutes(now.AddDays(-7), now);
+            List<Boot> boots;
+            try { boots = source != null ? JsonSerializer.Deserialize<List<Boot>>(source.List("boots")) ?? new() : BootService.Read(); }
+            catch (RemoteHistoryException) { boots = new(); } // an older version there: the rest still holds
+            return InsightService.From(week, boots, DateTime.UtcNow);
+        }).ContinueWith(t =>
+        {
+            if (ticket != _insightsTicket) return; // the PC shown changed meanwhile: a newer one follows
+            var said = t.IsCompletedSuccessfully ? t.Result : new List<string>();
+            InsightsTitle.Text = source == null ? "FROM THE LAST 7 DAYS" : $"FROM {source.Name.ToUpperInvariant()}'S LAST 7 DAYS";
+            InsightsList.ItemsSource = said;
+            InsightsCard.Visibility = said.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    private bool _scanningChanges;
+
+    /// <summary>
+    /// Apps installed, removed or updated since the last look, and Windows updates and drivers from Windows'
+    /// logs since then — written into the history, where the History chart marks them. The first look only
+    /// takes note of what's there.
+    /// </summary>
+    private void ScanChanges()
+    {
+        if (_scanningChanges) return;
+        _scanningChanges = true;
+        const string ScannedValue = "ChangesScanned";
+        DateTime? last;
+        using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Sysoptimizer"))
+            last = key?.GetValue(ScannedValue) is string text && DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var at) ? at : null;
+        var started = DateTime.UtcNow;
+        Task.Run(() =>
+        {
+            var found = new List<(DateTime Utc, string Kind, string Detail)>();
+            var apps = UninstallService.GetInstalledApps().GroupBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().Version ?? "", StringComparer.OrdinalIgnoreCase);
+            if (ChangeService.Load("installed-apps.txt") is { } before) found.AddRange(ChangeService.Diff(before, apps).Select(c => (started, c.Kind, c.Detail)));
+            ChangeService.Save("installed-apps.txt", apps);
+            // The first time, the logs' past only fills in which driver each device has: none of it is news.
+            var drivers = ChangeService.Load("drivers.txt");
+            var windows = BootService.WindowsChanges(drivers == null || last == null ? started.AddDays(-90) : last.Value, drivers ??= new(StringComparer.OrdinalIgnoreCase));
+            if (last != null) found.AddRange(windows);
+            ChangeService.Save("drivers.txt", drivers);
+            return found;
+        }).ContinueWith(t =>
+        {
+            _scanningChanges = false;
+            if (!t.IsCompletedSuccessfully) { Log($"Couldn't check what changed on this PC — {t.Exception?.InnerException?.Message}"); return; }
+            foreach (var (at, kind, detail) in t.Result.OrderBy(c => c.Utc)) HistoryStore.WriteEvent(kind, detail, at);
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer");
+            key.SetValue(ScannedValue, started.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
     /// <summary>Runs on every 1-second resource tick: records the history and feeds the live tabs.</summary>
     private HashSet<string>? _runningApps;
 
@@ -110,6 +178,8 @@ public partial class MainWindow
         if (PrivacyList.IsVisible && _tick % 5 == 0) RefreshPrivacy();
         if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _pan == null && _tick % 10 == 0) _ = LoadHistory();
         ReleaseHistoryIfHidden();
+        if (_tick % 300 == 60) ScanChanges(); // a minute after the start, then every five
+        if (_tick % 3600 == 90) RefreshInsights(); // hourly: a week's summary barely moves in an hour
 
         if (_tick == 15 && !_pawnIoHintShown)
         {

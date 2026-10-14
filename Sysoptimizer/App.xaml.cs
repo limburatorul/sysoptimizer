@@ -25,6 +25,13 @@ public partial class App : System.Windows.Application
         // whole app and the history stayed empty until it stopped. Its own work is light.
         System.Diagnostics.Process.GetCurrentProcess().PriorityClass = System.Diagnostics.ProcessPriorityClass.High;
 
+        // Written down, not handled: what broke and where, for this PC's log file and a watching PC.
+        AppLog.Write($"Sysoptimizer {Updater.Current} started");
+        DispatcherUnhandledException += (_, args) => AppLog.Write($"Crash: {args.Exception}");
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => AppLog.Write($"Crash: {args.ExceptionObject}");
+        TaskScheduler.UnobservedTaskException += (_, args) => AppLog.Write($"Error in background work: {args.Exception}");
+        Exit += (_, args) => AppLog.Write($"Sysoptimizer stopped (exit code {args.ApplicationExitCode})");
+
         ThemeManager.LoadSaved();
         base.OnStartup(e);
 

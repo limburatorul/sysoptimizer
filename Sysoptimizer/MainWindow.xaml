@@ -118,6 +118,22 @@
                                     </StackPanel>
                                 </DockPanel>
                             </Border>
+                            <!-- What the last week says: filled in the background, hidden when there's nothing to say -->
+                            <Border x:Name="InsightsCard" Visibility="Collapsed" Padding="20,14" Margin="0,0,0,16" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock x:Name="InsightsTitle" Text="FROM THE LAST 7 DAYS" Foreground="{DynamicResource TextSecondary}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                    <ItemsControl x:Name="InsightsList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,3">
+                                                    <TextBlock DockPanel.Dock="Left" Text="&#xE82F;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{DynamicResource Accent}" Margin="0,2,10,0" />
+                                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
                             <DockPanel Margin="0,0,0,12">
                                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource CaseLabel}" Tag="Show last" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
