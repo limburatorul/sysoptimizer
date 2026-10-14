@@ -31,10 +31,11 @@ public partial class MainWindow
         ("Friday", "Fridays"), ("Saturday", "Saturdays"), ("Sunday", "Sundays"),
     };
 
-    /// <param name="Pc">"" = this PC.</param>
+    /// <param name="Pc">"" = this PC, "*" = every watched PC at the time it runs.</param>
     private sealed record ScheduleEntry(string Id, string Pc, string Action, string Days, TimeSpan At, string LastRun);
 
     private readonly List<ScheduleEntry> _schedule = new();
+    private const string AllWatchedPcs = "Every watched PC";
     private PhoneServer? _phone;
     private ResourceSnapshot? _localSnap; // this PC's latest reading, for the phone page
 
@@ -76,11 +77,11 @@ public partial class MainWindow
 
     private void RefreshSchedule()
     {
-        SchedulePcCombo.ItemsSource = new[] { "This PC" }.Concat(_remotes.Select(r => r.Name)).ToList();
+        SchedulePcCombo.ItemsSource = new[] { "This PC" }.Concat(_remotes.Count > 0 ? new[] { AllWatchedPcs } : Array.Empty<string>()).Concat(_remotes.Select(r => r.Name)).ToList();
         if (SchedulePcCombo.SelectedIndex < 0) SchedulePcCombo.SelectedIndex = 0;
         ScheduleList.ItemsSource = _schedule.OrderBy(e => e.At).Select(e => new OptionItem
         {
-            Name = $"{ScheduleActions.First(a => a.Action == e.Action).Label} — {(e.Pc.Length == 0 ? "this PC" : e.Pc)}",
+            Name = $"{ScheduleActions.First(a => a.Action == e.Action).Label} — {e.Pc switch { "" => "this PC", "*" => "every watched PC", var pc => pc }}",
             Description = $"{ScheduleDays.FirstOrDefault(d => d.Days == e.Days).Label ?? e.Days} at {e.At:hh\\:mm}",
             Note = e.LastRun.Length > 0 ? $"last ran {e.LastRun}" : "",
             Tag = e.Id,
@@ -89,7 +90,7 @@ public partial class MainWindow
 
     private void ScheduleAdd_Click(object sender, RoutedEventArgs e)
     {
-        string pc = SchedulePcCombo.SelectedIndex <= 0 ? "" : (string)SchedulePcCombo.SelectedItem;
+        string pc = SchedulePcCombo.SelectedIndex <= 0 ? "" : SchedulePcCombo.SelectedItem as string == AllWatchedPcs ? "*" : (string)SchedulePcCombo.SelectedItem;
         var action = ScheduleActions[Math.Max(0, ScheduleActionCombo.SelectedIndex)].Action;
         var days = ScheduleDays[Math.Max(0, ScheduleDaysCombo.SelectedIndex)].Days;
         if (!TimeSpan.TryParseExact(ScheduleTimeBox.Text.Trim(), @"h\:mm", null, out var at) || at >= TimeSpan.FromDays(1))
@@ -146,9 +147,13 @@ public partial class MainWindow
                 var command = new RemoteCommand(e.Action, null, null, "");
                 _ = Task.Run(() => RunCommand(command, scheduled: true));
             }
-            else if (_remotes.FirstOrDefault(r => r.Name == e.Pc) is not { } target) Log($"Schedule: {e.Pc} isn't watched any more — {label} skipped.");
-            else if (e.Action == "wake") _ = Wake(target);
-            else _ = RunOn(target, $"Schedule: {label}", t => t.Run(e.Action));
+            else
+            {
+                var targets = e.Pc == "*" ? _remotes.ToList() : _remotes.Where(r => r.Name == e.Pc).ToList();
+                if (targets.Count == 0) Log($"Schedule: {(e.Pc == "*" ? "no PC is watched" : $"{e.Pc} isn't watched any more")} — {label} skipped.");
+                foreach (var target in targets)
+                    _ = e.Action == "wake" ? Wake(target) : RunOn(target, $"Schedule: {label}", t => t.Run(e.Action));
+            }
         }
         if (ScheduleList.IsVisible) RefreshSchedule();
     }

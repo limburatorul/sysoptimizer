@@ -290,9 +290,9 @@ public static class HistoryStore
             }
             else if (systemOnly) continue;
             else if (f[0] == "P" && f.Length >= 6)
-                data.Processes.Add(new ProcSample(time, f[2], P(f[3]), P(f[4]), P(f[5]), f.Length > 6 ? P(f[6]) : float.NaN));
+                data.Processes.Add(new ProcSample(time, string.Intern(f[2]), P(f[3]), P(f[4]), P(f[5]), f.Length > 6 ? P(f[6]) : float.NaN));
             else if (f[0] == "E")
-                data.Events.Add(new HistoryEvent(time, f[2], f.Length > 3 ? f[3] : ""));
+                data.Events.Add(new HistoryEvent(time, string.Intern(f[2]), f.Length > 3 ? string.Intern(f[3]) : ""));
         }
         // Minute summaries list S rows, then P, then E, and a launch is written ~10 s after the time it
         // carries — callers need each list in time order.
@@ -326,6 +326,12 @@ public static class HistoryStore
             Append(_todayData, fresh);
             return Copy(_todayData);
         }
+    }
+
+    /// <summary>Drops today's parsed rows; the next read parses the file afresh.</summary>
+    public static void ForgetToday()
+    {
+        lock (TodayGate) (_todayDay, _todayOffset, _todayData) = (default, 0, new(new(), new(), new()));
     }
 
     /// <summary>Adds newer rows to a day, keeping each list in time order (a launch is written after the time it carries).</summary>

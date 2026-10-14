@@ -109,6 +109,7 @@ public partial class MainWindow
         if (processesShown && processes != null && _source == null) UpdateProcessRows();
         if (PrivacyList.IsVisible && _tick % 5 == 0) RefreshPrivacy();
         if (HistoryChart.IsVisible && _historyEnd == null && !_navDragging && !_chartSelecting && _pan == null && _tick % 10 == 0) _ = LoadHistory();
+        ReleaseHistoryIfHidden();
 
         if (_tick == 15 && !_pawnIoHintShown)
         {
@@ -159,7 +160,9 @@ public partial class MainWindow
     {
         string filter = ProcessFilterBox.Text.Trim();
         var shown = _source == null ? _lastProcesses : _remoteProcesses;
-        Func<ProcessUsage, double> key = _processSort switch { "ram" => p => p.RamMB, "gpu" => p => p.Gpu, _ => p => p.Cpu };
+        // Sorted by half-percent steps: the long tail of apps near 0% CPU swapped places on every tick over
+        // a tenth of a percent, and moving ~170 rows a second stuttered the list. Ties go by name, so it holds still.
+        Func<ProcessUsage, double> key = _processSort switch { "ram" => p => p.RamMB, "gpu" => p => Math.Round(p.Gpu * 2), _ => p => Math.Round(p.Cpu * 2) };
         var sorted = shown
             .Where(p => filter.Length == 0 || p.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
                         || (p.Description?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false))

@@ -167,7 +167,10 @@ try
     var salt = RemoteCrypto.NewSalt();
     DateTime energyFrom = default, energyTo = default;
     using (new HistoryServer(port, key, salt, () => "{\"CpuPercent\":42}"u8.ToArray(), () => "[{\"Name\":\"app\"}]"u8.ToArray(),
-        (from, to) => { (energyFrom, energyTo) = (from, to); return "chrome\t1.5"; }, FakeRun, name => name == "startup" ? "[\"startup list\"]"u8.ToArray() : null, "localhost"))
+        (from, to) => { (energyFrom, energyTo) = (from, to); return "chrome\t1.5"; }, FakeRun, name => name == "startup" ? "[\"startup list\"]"u8.ToArray() : null,
+        (folder, name) => folder != "Downloads" ? null
+            : name == null ? System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new[] { new RemoteFiles.Entry("a b.txt", 3, DateTime.UtcNow) })
+            : name == "a b.txt" ? "abc"u8.ToArray() : null, host: "localhost"))
     {
         var client = new RemoteHistory("test", "localhost", port, key);
         Check(client.Hello() == Environment.MachineName, "remote: the server says who it is");
@@ -186,6 +189,12 @@ try
         Check(second.System.Count == first.System.Count + 1, "remote: only new lines added, none twice");
         Check(second.Events.Any(e => e.Detail == "late-app"), "remote: a launch written late isn't skipped");
         Check(client.ReadDay(DateTime.Today.AddDays(-1), minutes: true).System.Count == 1, "remote: a finished day's minute summary arrives");
+        Check(client.Files("Downloads") is [{ Name: "a b.txt", Bytes: 3 }] && client.CopyFile("Downloads", "a b.txt").SequenceEqual("abc"u8.ToArray()),
+            "files: a folder's list and a file's copy arrive");
+        try { client.Files("Windows"); Check(false, "files: only the three folders"); }
+        catch (RemoteHistoryException) { Check(true, "files: only the three folders"); }
+        Check(RemoteFiles.FileOf("Downloads", @"..\secret.txt") == null && RemoteFiles.FileOf("Downloads", "NUL") == null && RemoteFiles.FileOf("System32", "x.dll") == null
+              && RemoteFiles.FileOf("Downloads", "no such file " + Guid.NewGuid() + ".txt") == null, "files: no paths, device names, other folders or missing files");
 
         var intruder = new RemoteHistory("x", "localhost", port, otherKey);
         try { intruder.Hello(); Check(false, "remote: the wrong key gets nothing"); }

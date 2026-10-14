@@ -88,7 +88,7 @@ public partial class MainWindow
         {
             _server = new HistoryServer(port, RemoteCrypto.ParseKey(RemoteKeyBox.Text)!, Salt(), () => _liveJson,
                 () => JsonSerializer.SerializeToUtf8Bytes(_lastProcesses.Select(p => p with { Path = null }), LiveJson), // a path means nothing on the watching PC
-                EnergyLines, command => RunCommand(command, scheduled: false), RemoteList);
+                EnergyLines, command => RunCommand(command, scheduled: false), RemoteList, ShareFile);
         }
         catch (HttpListenerException ex)
         {
@@ -300,8 +300,18 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>A watching PC lists a folder (name null) or copies a file from it — announced here, like a command.</summary>
+    private byte[]? ShareFile(string? folder, string? name)
+    {
+        if (name == null) return RemoteFiles.List(folder);
+        if (RemoteFiles.FileOf(folder, name) is not { } path) return null;
+        Dispatcher.Invoke(() => Alert($"remote:{Guid.NewGuid()}", $"A watching PC is copying {name} from {folder}"));
+        try { return File.ReadAllBytes(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; } // in use, or gone meanwhile
+    }
+
     /// <summary>
-    /// A file sent from a watching PC, saved in Downloads under its own name — or "name (2).ext" beside one
+    /// A file sent from (or copied off) another PC, saved in Downloads under its own name — or "name (2).ext" beside one
     /// already there, never over it. Marked as from the internet, as a browser would, so Windows asks before
     /// running a program that arrived this way.
     /// </summary>
@@ -467,6 +477,12 @@ public partial class MainWindow
             if (dialog.ShowDialog(this) == true) await SendFiles(targets, dialog.FileNames);
         };
         menu.Items.Add(send);
+        if (targets.Count == 1)
+        {
+            var get = new MenuItem { Header = "Get files…", ToolTip = "Copy files from its Downloads, Desktop or Documents to your Downloads" };
+            get.Click += (_, _) => GetFiles(targets[0]);
+            menu.Items.Add(get);
+        }
         menu.Items.Add(new Separator());
         bool wakeable = targets.Any(t => t.Macs.Length > 0);
         var wake = new MenuItem { Header = "Wake up", IsEnabled = wakeable,
@@ -476,6 +492,71 @@ public partial class MainWindow
         Add("Restart…", "restart", $"Restart {who}? Whoever is using it gets a minute's notice to save their work.");
         Add("Shut down…", "shutdown", $"Shut {who} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
         menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// A small window over the watched PC's Downloads, Desktop or Documents: pick files, and they're copied to
+    /// this PC's Downloads (saved like a received file: never over one, marked as from another computer).
+    /// </summary>
+    private void GetFiles(RemoteHistory target)
+    {
+        var folder = new ComboBox { ItemsSource = RemoteFiles.Folders, SelectedIndex = 0, Width = 160, Margin = new Thickness(0, 0, 0, 10), HorizontalAlignment = HorizontalAlignment.Left };
+        System.Windows.Automation.AutomationProperties.SetName(folder, "Folder");
+        var list = new ListBox { SelectionMode = SelectionMode.Extended, Height = 380, Background = System.Windows.Media.Brushes.Transparent };
+        list.SetResourceReference(Control.ForegroundProperty, "TextPrimary");
+        list.SetResourceReference(Control.BorderBrushProperty, "Border");
+        System.Windows.Automation.AutomationProperties.SetName(list, "Files");
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+        status.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
+        var copy = new Button { Content = "Copy to my Downloads", Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, IsEnabled = false };
+        copy.SetResourceReference(StyleProperty, "PrimaryButton");
+        var panel = new DockPanel { Margin = new Thickness(16) };
+        foreach (var (element, dock) in new (UIElement, Dock)[] { (folder, Dock.Top), (copy, Dock.Bottom), (status, Dock.Bottom) })
+        {
+            DockPanel.SetDock(element, dock);
+            panel.Children.Add(element);
+        }
+        panel.Children.Add(list);
+        var window = new Window { Title = $"Files on {target.Name}", Owner = this, Width = 600, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel };
+        window.SetResourceReference(BackgroundProperty, "Surface");
+
+        async Task Load()
+        {
+            string name = (string)folder.SelectedItem;
+            status.Text = $"Reading {name} on {target.Name}…";
+            list.Items.Clear();
+            try
+            {
+                var files = await Task.Run(() => target.Files(name));
+                foreach (var f in files)
+                    list.Items.Add(new ListBoxItem { Content = $"{f.Name}   ·   {CleanupService.FormatSize(f.Bytes)}   ·   {f.Modified.ToLocalTime():d MMM yyyy HH:mm}", Tag = f });
+                status.Text = files.Count == 0 ? "No files here." : $"{files.Count} files, newest first. Pick one or more (Ctrl or Shift for several).";
+            }
+            catch (RemoteHistoryException ex) { status.Text = $"Can't read it — {ex.Message}"; }
+        }
+        folder.SelectionChanged += async (_, _) => await Load();
+        list.SelectionChanged += (_, _) => copy.IsEnabled = list.SelectedItems.Count > 0;
+        copy.Click += async (_, _) =>
+        {
+            string name = (string)folder.SelectedItem;
+            var picked = list.SelectedItems.Cast<ListBoxItem>().Select(i => (RemoteFiles.Entry)i.Tag).ToList();
+            copy.IsEnabled = false;
+            foreach (var f in picked)
+            {
+                status.Text = $"Copying {f.Name} ({CleanupService.FormatSize(f.Bytes)})…";
+                try
+                {
+                    var bytes = await Task.Run(() => target.CopyFile(name, f.Name));
+                    string saved = await Task.Run(() => SaveReceived(f.Name, bytes, out var output) ? output : "couldn't save it — " + output);
+                    Log($"{f.Name} from {target.Name}: {saved}");
+                    status.Text = $"{f.Name}: {saved}";
+                }
+                catch (RemoteHistoryException ex) { Log($"{f.Name} from {target.Name}: {ex.Message}"); status.Text = $"{f.Name}: {ex.Message}"; }
+            }
+            copy.IsEnabled = list.SelectedItems.Count > 0;
+        };
+        window.Show();
+        _ = Load();
     }
 
     /// <summary>Files dropped on a watched PC's card go to that PC's Downloads folder.</summary>

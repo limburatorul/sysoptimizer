@@ -20,7 +20,7 @@ namespace Sysoptimizer.Services;
 ///     it answers — the LAN sees neither what ran nor when, and can't alter or replay it;
 ///   • besides reading, the key lets the watcher act here — install apps (winget, a link, or an .exe/.msi it
 ///     uploads, sealed the same way), update them, end an app, clean up, restart or shut down, or drop a file
-///     in its Downloads folder; each such
+///     in its Downloads folder, or copy one from its Downloads, Desktop or Documents; each such
 ///     request runs once. The key can be random, or derived from a password (PBKDF2, with this PC's salt);
 ///   • the firewall rules are for private networks only; a UDP probe on the same port finds sharing PCs.
 /// Free of WPF so the self-test can exercise it.
@@ -153,6 +153,47 @@ public sealed record RemoteCommand(string Action, string? Target, byte[]? File, 
 }
 
 /// <summary>
+/// The folders a watcher may list and copy files from: the signed-in user's Downloads, Desktop and Documents —
+/// their files only, not subfolders, nothing hidden, no links leading elsewhere.
+/// </summary>
+public static class RemoteFiles
+{
+    public static readonly string[] Folders = { "Downloads", "Desktop", "Documents" };
+
+    public sealed record Entry(string Name, long Bytes, DateTime Modified);
+
+    public static string? PathOf(string? folder) => folder switch
+    {
+        "Downloads" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+        "Desktop" => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        "Documents" => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        _ => null,
+    };
+
+    private static bool Plain(FileInfo f) =>
+        (f.Attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) == 0 && RemoteCommand.PlainFileName(f.Name) != null;
+
+    /// <summary>The folder's files, newest first (500 at most), as JSON; null for a folder that isn't one of the three.</summary>
+    public static byte[]? List(string? folder)
+    {
+        if (PathOf(folder) is not { } dir) return null;
+        var files = Directory.Exists(dir)
+            ? new DirectoryInfo(dir).EnumerateFiles().Where(Plain).OrderByDescending(f => f.LastWriteTimeUtc).Take(500)
+                .Select(f => new Entry(f.Name, f.Length, f.LastWriteTimeUtc)).ToList()
+            : new List<Entry>();
+        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(files);
+    }
+
+    /// <summary>The full path of a file a watcher may copy, or null: a bare name, right in one of the three folders, up to 512 MB.</summary>
+    public static string? FileOf(string? folder, string? name)
+    {
+        if (PathOf(folder) is not { } dir || RemoteCommand.PlainFileName(name) == null) return null;
+        var file = new FileInfo(Path.Combine(dir, name!));
+        return file.Exists && Plain(file) && file.Length <= RemoteCommand.MaxFileBytes ? file.FullName : null;
+    }
+}
+
+/// <summary>
 /// The watched PC's side: answers signed requests for its history and readings, runs what a watcher asks,
 /// and answers "who's sharing?" probes on the same port (UDP) with its name.
 /// </summary>
@@ -168,6 +209,7 @@ public sealed class HistoryServer : IDisposable
     private readonly Func<DateTime, DateTime, string>? _energy;
     private readonly Func<string, byte[]?>? _lists;
     private readonly Func<RemoteCommand, string>? _run;
+    private readonly Func<string?, string?, byte[]?>? _files;
     private readonly Dictionary<string, DateTime> _ran = new(); // commands already run, by signature
     private readonly object _runGate = new();                   // one at a time
 
@@ -177,11 +219,13 @@ public sealed class HistoryServer : IDisposable
     /// <param name="energy">Windows' energy figures per app between two UTC times, one "app\tWh" line each.</param>
     /// <param name="run">Runs a command and returns its outcome ("ok"/"failed" line, then details).</param>
     /// <param name="lists">Any other list the app keeps, by endpoint name (startup, services, boots), serialized; null = none.</param>
+    /// <param name="files">A folder's file list (name null), or a file's bytes, for a watcher copying files; null = refused.</param>
     /// <param name="host">"+" = every address (needs admin — the app always runs elevated); the self-test uses localhost.</param>
     public HistoryServer(int port, byte[] key, byte[]? salt = null, Func<byte[]?>? live = null, Func<byte[]?>? processes = null,
-        Func<DateTime, DateTime, string>? energy = null, Func<RemoteCommand, string>? run = null, Func<string, byte[]?>? lists = null, string host = "+")
+        Func<DateTime, DateTime, string>? energy = null, Func<RemoteCommand, string>? run = null, Func<string, byte[]?>? lists = null,
+        Func<string?, string?, byte[]?>? files = null, string host = "+")
     {
-        (_key, _salt, _live, _processes, _energy, _run, _lists) = (key, salt, live, processes, energy, run, lists);
+        (_key, _salt, _live, _processes, _energy, _run, _lists, _files) = (key, salt, live, processes, energy, run, lists, files);
         _listener.Prefixes.Add($"http://{host}:{port}{Prefix}");
         _listener.Start();
         _ = Task.Run(Loop);
@@ -241,6 +285,7 @@ public sealed class HistoryServer : IDisposable
                 : endpoint.EndsWith("/live") ? _live?.Invoke()
                 : endpoint.EndsWith("/procs") ? _processes?.Invoke()
                 : endpoint.EndsWith("/energy") ? Energy(request.QueryString)
+                : endpoint.EndsWith("/files") ? _files?.Invoke(request.QueryString["folder"], request.QueryString["name"])
                 : Answer(endpoint, request.QueryString) ?? _lists?.Invoke(endpoint[(endpoint.LastIndexOf('/') + 1)..]);
             if (body == null) { response.StatusCode = 400; return; }
             var sealedBody = RemoteCrypto.Seal(_key, $"{path}\n{time}", body);
@@ -444,6 +489,14 @@ public sealed class RemoteHistory
             + (args.Length > 0 ? $"&args={Uri.EscapeDataString(args)}" : "")
             + $"&n={Guid.NewGuid():N}", file, SlowHttp); // so the same command twice in a second isn't taken for a replay
 
+    /// <summary>The files in one of its <see cref="RemoteFiles.Folders"/>, newest first (JSON of <see cref="RemoteFiles.Entry"/>).</summary>
+    public List<RemoteFiles.Entry> Files(string folder) =>
+        System.Text.Json.JsonSerializer.Deserialize<List<RemoteFiles.Entry>>(Get($"files?folder={Uri.EscapeDataString(folder)}")) ?? new();
+
+    /// <summary>A copy of one of those files.</summary>
+    public byte[] CopyFile(string folder, string name) =>
+        SendBytes(HttpMethod.Get, $"files?folder={Uri.EscapeDataString(folder)}&name={Uri.EscapeDataString(name)}", null, SlowHttp);
+
     /// <summary>The PC's running apps, as its Processes tab lists them (JSON).</summary>
     public string Processes() => Get("procs");
 
@@ -478,6 +531,12 @@ public sealed class RemoteHistory
         return DateTime.TryParseExact(oldest, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
     }
 
+    /// <summary>Lets go of everything kept from this PC's history; it's asked for again when needed.</summary>
+    public void Forget()
+    {
+        lock (_gate) { _finished.Clear(); _today = new(new(), new(), new()); _todayAfter = 0; _lastFetch.Clear(); _todayDay = default; }
+    }
+
     public HistoryData ReadDay(DateTime day, bool minutes)
     {
         string text;
@@ -487,7 +546,8 @@ public sealed class RemoteHistory
             {
                 if (!_finished.TryGetValue((day, minutes), out text!))
                 {
-                    if (_finished.Count >= 12) _finished.Remove(_finished.Keys.First()); // a few MB a day: don't keep a month of them
+                    // A per-second day is a few MB of text: keep about two weeks of minute summaries' worth, not a month of days.
+                    while (_finished.Count > 0 && _finished.Values.Sum(t => (long)t.Length) > 12_000_000) _finished.Remove(_finished.Keys.First());
                     _finished[(day, minutes)] = text = Get($"day?date={day:yyyy-MM-dd}&kind={(minutes ? "min" : "raw")}");
                 }
             }
@@ -535,7 +595,10 @@ public sealed class RemoteHistory
 
     private string Get(string relative) => Send(HttpMethod.Get, relative, null, Http);
 
-    private string Send(HttpMethod method, string relative, byte[]? upload, HttpClient http)
+    private string Send(HttpMethod method, string relative, byte[]? upload, HttpClient http) =>
+        Encoding.UTF8.GetString(SendBytes(method, relative, upload, http));
+
+    private byte[] SendBytes(HttpMethod method, string relative, byte[]? upload, HttpClient http)
     {
         string path = HistoryServer.Prefix + relative;
         long time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -556,7 +619,7 @@ public sealed class RemoteHistory
             if (!response.IsSuccessStatusCode) throw new RemoteHistoryException($"answered {(int)response.StatusCode} {response.ReasonPhrase}");
             using var body = new MemoryStream();
             response.Content.ReadAsStream().CopyTo(body);
-            try { return Encoding.UTF8.GetString(RemoteCrypto.Open(_key, $"{path}\n{time}", body.ToArray())); }
+            try { return RemoteCrypto.Open(_key, $"{path}\n{time}", body.ToArray()); }
             catch (CryptographicException) { throw new RemoteHistoryException("sent an answer that doesn't check out (wrong key, or altered on the way)"); }
         }
     }

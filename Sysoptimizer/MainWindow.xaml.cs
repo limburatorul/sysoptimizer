@@ -81,7 +81,11 @@ public partial class MainWindow : Window
         _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 40 });
         _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 46 });
         _liveGraphs.Add(new GraphBinding { Container = GpuGraphGrid, Line = GpuSparkline, Fill = GpuAreaFill, History = _gpuHistory, AutoScale = false, AxisTopInset = 6 });
-        CompositionTarget.Rendering += OnRendering;
+        // The live graphs redraw every frame — but only while one can be seen: subscribed, Rendering keeps WPF
+        // drawing 60 frames a second even with the window hidden in the tray, where it lives most of the day.
+        IsVisibleChanged += (_, _) => UpdateRenderingHook();
+        StateChanged += (_, _) => UpdateRenderingHook();
+        Tabs.SelectionChanged += (_, e) => { if (e.Source == Tabs) UpdateRenderingHook(); };
 
         ApplyRoundedClip(CpuCardBorder);
         ApplyRoundedClip(MemCardBorder);
@@ -230,9 +234,11 @@ public partial class MainWindow : Window
 
     // --- Resources ---
 
-    private void StartResourceMonitor()
+    private async void StartResourceMonitor()
     {
-        try { _resourceMonitor = new ResourceMonitor(); }
+        // Setting up the counters takes half a second (and waits for PDH's first tick): off the UI thread,
+        // so the window is on screen at once and the graphs start a moment later.
+        try { _resourceMonitor = await Task.Run(() => new ResourceMonitor()); }
         catch (Exception ex) { Log($"Resource monitor unavailable — {ex.Message}"); return; }
 
         _resourceTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -527,6 +533,18 @@ public partial class MainWindow : Window
     /// smoothly between the once-a-second samples instead of jumping. Throttled to ~30fps in case the
     /// display composes faster than that.
     /// </summary>
+    private bool _renderingHooked;
+
+    private void UpdateRenderingHook()
+    {
+        bool wanted = IsVisible && WindowState != WindowState.Minimized
+                      && Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "Resources" or "Disks" or "Network" };
+        if (wanted == _renderingHooked) return;
+        _renderingHooked = wanted;
+        if (wanted) CompositionTarget.Rendering += OnRendering;
+        else CompositionTarget.Rendering -= OnRendering;
+    }
+
     private void OnRendering(object? sender, EventArgs e)
     {
         var now = DateTime.UtcNow;

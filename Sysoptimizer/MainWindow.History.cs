@@ -176,6 +176,7 @@ public partial class MainWindow
         HistoryChart.SizeChanged += (_, _) => DrawHistory();
         HistoryChart.LostMouseCapture += (_, _) => { if (_pressX != null) CancelSelection(); EndPan(); }; // capture taken away mid-press
         HistoryNavigator.SizeChanged += (_, _) => DrawNavigator();
+        HistoryChart.IsVisibleChanged += (_, e) => { if ((bool)e.NewValue && _dayCache.Count == 0) _ = LoadHistory(); }; // back from the tray after its days were let go
         ThemeManager.ThemeChanged += () => { DrawHistory(); DrawNavigator(); }; // the heat gradients are built from theme colours
     }
 
@@ -185,7 +186,8 @@ public partial class MainWindow
     private readonly HashSet<(DateTime Day, bool Minutely)> _dayLoading = new();
     private bool _histProcsDirty;
     private bool _histWatts; // the range has CPU or GPU draw recorded, so the Power and Battery lists can rank apps by watts
-    private const int CachedDays = 10; // ~5 MB a day at per-second resolution
+    // A per-second day is 10-20 MB parsed, a minute summary under 1: few of the first, a month of the second.
+    private const int CachedRawDays = 4, CachedMinuteDays = 35;
 
     /// <summary>Re-reads what changed (today) and shows the committed range — buttons, ticks, end of a drag.</summary>
     private Task LoadHistory()
@@ -288,12 +290,43 @@ public partial class MainWindow
     private void TrimDayCache()
     {
         var center = _historyFrom.AddTicks((_historyTo - _historyFrom).Ticks / 2).Date;
-        foreach (var key in _dayCache.Keys.OrderByDescending(k => Math.Abs((k.Day - center).TotalDays)).ToList())
+        foreach (bool minutely in new[] { false, true })
         {
-            if (_dayCache.Count <= CachedDays) break;
-            if (key.Day >= ViewFrom.Date && key.Day <= _historyTo.Date) continue;
-            _dayCache.Remove(key);
+            int keep = minutely ? CachedMinuteDays : CachedRawDays;
+            foreach (var key in _dayCache.Keys.Where(k => k.Minutely == minutely).OrderByDescending(k => Math.Abs((k.Day - center).TotalDays)).ToList())
+            {
+                if (_dayCache.Keys.Count(k => k.Minutely == minutely) <= keep) break;
+                if (key.Day >= ViewFrom.Date && key.Day <= _historyTo.Date) continue;
+                _dayCache.Remove(key);
+            }
         }
+    }
+
+    private DateTime? _historyHiddenSince;
+
+    /// <summary>
+    /// Once History has been out of sight for two minutes (another tab, or the window in the tray), lets go of
+    /// the days it kept — up to a few hundred MB for a week of another PC — and gives the memory back to
+    /// Windows. Opening History again reads them anew, from disk or from the watched PC. Called every second.
+    /// </summary>
+    private void ReleaseHistoryIfHidden()
+    {
+        if (HistoryChart.IsVisible || _dayCache.Count == 0) { _historyHiddenSince = null; return; }
+        _historyHiddenSince ??= DateTime.UtcNow;
+        if ((DateTime.UtcNow - _historyHiddenSince.Value).TotalMinutes < 2) return;
+        _historyHiddenSince = null;
+        _dayCache.Clear();
+        (_hist, _before, _navData, _navLoadedAt) = (new(new(), new(), new()), new(), new(), default);
+        (_histProcs, _histProcTimes, _histProcsDirty) = (new(), new(), true);
+        foreach (var list in new System.Collections.IList[] { _dragData.System, _dragData.Processes, _dragData.Events, _dragBefore }) list.Clear();
+        _dragData.System.TrimExcess(); _dragData.Processes.TrimExcess(); _dragData.Events.TrimExcess(); _dragBefore.TrimExcess();
+        HistoryCursorList.ItemsSource = HistoryRangeList.ItemsSource = null;
+        _detailsShown = null;
+        HistoryStore.ForgetToday();
+        foreach (var remote in _remotes) remote.Forget();
+        // The freed days sit in the large-object heap, which isn't compacted on its own: once, now that they're gone.
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
     }
 
     private void UpdateRangeList()
