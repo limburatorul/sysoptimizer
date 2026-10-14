@@ -146,6 +146,7 @@ public static class HistoryStore
     /// <summary>One whole local day, per second or per minute — the unit the History tab caches to scroll smoothly.</summary>
     public static HistoryData ReadDay(DateTime day, bool minutes)
     {
+        if (!minutes && day == DateTime.Today && ReadTodayTail() is { } today) return today;
         var data = new HistoryData(new(), new(), new());
         using var reader = minutes ? OpenMinutes(day) : OpenRaw(day);
         if (reader != null) Parse(reader, long.MinValue, long.MaxValue, data, systemOnly: false);
@@ -298,6 +299,52 @@ public static class HistoryStore
         data.Processes.Sort((a, b) => a.Time.CompareTo(b.Time));
         data.Events.Sort((a, b) => a.Time.CompareTo(b.Time));
     }
+
+    // Today's file, parsed once and then only what was appended since: the History tab re-reads today every
+    // ten seconds, and parsing the whole day again each time cost a quarter of a second and ~50 MB of garbage.
+    private static readonly object TodayGate = new();
+    private static DateTime _todayDay;
+    private static long _todayOffset;
+    private static HistoryData _todayData = new(new(), new(), new());
+
+    /// <summary>Today's per-second data, read incrementally; null when today's file isn't plain CSV (yet).</summary>
+    private static HistoryData? ReadTodayTail()
+    {
+        string csv = RawPath(DateTime.Today);
+        lock (TodayGate)
+        {
+            if (!File.Exists(csv)) return null;
+            using var stream = Shared(csv);
+            if (_todayDay != DateTime.Today || stream.Length < _todayOffset) (_todayDay, _todayOffset, _todayData) = (DateTime.Today, 0, new(new(), new(), new()));
+            stream.Seek(_todayOffset, SeekOrigin.Begin);
+            var bytes = new byte[stream.Length - _todayOffset];
+            stream.ReadExactly(bytes);
+            int end = Array.LastIndexOf(bytes, (byte)'\n') + 1; // a line still being written waits for the next read
+            var fresh = new HistoryData(new(), new(), new());
+            Parse(new StringReader(System.Text.Encoding.UTF8.GetString(bytes, 0, end)), long.MinValue, long.MaxValue, fresh, systemOnly: false);
+            _todayOffset += end;
+            Append(_todayData, fresh);
+            return Copy(_todayData);
+        }
+    }
+
+    /// <summary>Adds newer rows to a day, keeping each list in time order (a launch is written after the time it carries).</summary>
+    public static void Append(HistoryData day, HistoryData fresh)
+    {
+        static void Add<T>(List<T> to, List<T> more, Func<T, DateTime> time)
+        {
+            if (more.Count == 0) return;
+            bool sorted = to.Count == 0 || time(more[0]) >= time(to[^1]);
+            to.AddRange(more);
+            if (!sorted) to.Sort((a, b) => time(a).CompareTo(time(b)));
+        }
+        Add(day.System, fresh.System, s => s.Time);
+        Add(day.Processes, fresh.Processes, p => p.Time);
+        Add(day.Events, fresh.Events, e => e.Time);
+    }
+
+    /// <summary>A copy the caller can keep while the original grows on another thread.</summary>
+    public static HistoryData Copy(HistoryData d) => new(new(d.System), new(d.Processes), new(d.Events));
 
     private static float P(string s) => float.TryParse(s, NumberStyles.Float, Inv, out float v) ? v : float.NaN;
 

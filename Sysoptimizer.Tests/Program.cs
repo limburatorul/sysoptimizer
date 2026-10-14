@@ -44,6 +44,22 @@ try
     Check(today.Processes.Count == 2 && today.Processes.Any(p => p.Name == "game_with comma" && p.Gpu == 50), "today: apps round-trip, a comma in a name can't split the line");
     Check(today.Events.Count == 1 && today.Events[0].Kind == "launch" && today.Events[0].Detail == "notepad", "today: event round-trip");
 
+    // Today is read incrementally: only what was appended, never a half-written line, the earlier result untouched.
+    var day1 = HistoryStore.ReadDay(DateTime.Today, minutes: false);
+    void AppendRaw(string text)
+    {
+        using var f = new FileStream(Path.Combine(folder, $"{DateTime.Today:yyyy-MM-dd}.csv"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        f.Write(System.Text.Encoding.UTF8.GetBytes(text));
+    }
+    long tailT = Unix(now);
+    AppendRaw($"S,{tailT + 1},20,40,7,65,45\nS,{tailT + 2},2");
+    var day2 = HistoryStore.ReadDay(DateTime.Today, minutes: false);
+    AppendRaw($"1,40,7,65,45\nE,{tailT - 5},launch,late\n");
+    var day3 = HistoryStore.ReadDay(DateTime.Today, minutes: false);
+    Check(day1.System.Count == 1 && day2.System.Count == 2 && day3.System.Count == 3 && day3.System[^1].Cpu == 21,
+        "today: appended lines read once, a half-written line waits for its end");
+    Check(day3.Events.Select(e => e.Detail).SequenceEqual(new[] { "late", "notepad" }), "today: a late-stamped line lands in time order");
+
     // 2. A finished day written by hand: an old 7-field line, a new 9-field one, a torn line, junk.
     var yesterday = DateTime.Today.AddDays(-1);
     long noon = Unix(yesterday.AddHours(12));
@@ -160,13 +176,14 @@ try
         var at = new DateTime(2026, 10, 12, 8, 0, 0, DateTimeKind.Utc);
         Check(client.Energy(at, at.AddHours(1)) == "chrome\t1.5" && energyFrom == at && energyTo == at.AddHours(1), "remote: energy figures for the asked range");
         var first = client.ReadDay(DateTime.Today, minutes: false);
-        Check(first.System.Count == 1 && first.Events.Count == 1, $"remote: today's lines arrive ({first.System.Count} S, {first.Events.Count} E)");
+        var here = HistoryStore.ReadDay(DateTime.Today, minutes: false);
+        Check(first.System.Count == here.System.Count && first.Events.Count == here.Events.Count, $"remote: today's lines arrive ({first.System.Count} S, {first.Events.Count} E)");
         // More of today, including a launch stamped earlier than the newest line (written ~10 s late).
         var later = DateTime.UtcNow.AddSeconds(2);
         HistoryStore.Write(new SysSample(later, 50, 41, 8, 66, 46, 1, 1));
         HistoryStore.WriteEvent("launch", "late-app", later.AddSeconds(-10));
         var second = client.ReadDay(DateTime.Today, minutes: false);
-        Check(second.System.Count == 2, "remote: only new lines added, none twice");
+        Check(second.System.Count == first.System.Count + 1, "remote: only new lines added, none twice");
         Check(second.Events.Any(e => e.Detail == "late-app"), "remote: a launch written late isn't skipped");
         Check(client.ReadDay(DateTime.Today.AddDays(-1), minutes: true).System.Count == 1, "remote: a finished day's minute summary arrives");
 

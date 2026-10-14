@@ -452,9 +452,7 @@
                                 </Grid.ColumnDefinitions>
                                 <DockPanel>
                                     <TextBlock x:Name="HistoryCursorTitle" DockPanel.Dock="Top" Text="Hover to see what was running · click to pin a moment · drag across a stretch or scroll to zoom · click an app below to chart it · right-drag to move, right-click to clear" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6" TextWrapping="Wrap" />
-                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                                        <ItemsControl x:Name="HistoryCursorList" ItemTemplate="{StaticResource HistoryAppRowTemplate}" />
-                                    </ScrollViewer>
+                                    <ItemsControl x:Name="HistoryCursorList" Style="{StaticResource VirtualList}" ItemTemplate="{StaticResource HistoryAppRowTemplate}" />
                                 </DockPanel>
                                 <DockPanel Grid.Column="2">
                                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
@@ -462,9 +460,7 @@
                                                   ToolTip="Rank the apps by the energy Windows itself recorded (screen, disk and network included) instead of the estimate from CPU and GPU use. Windows writes it about once an hour and keeps about a week." />
                                         <TextBlock x:Name="HistoryRangeTitle" Text="TOP APPS IN THIS RANGE" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                     </DockPanel>
-                                    <ScrollViewer Style="{StaticResource GlassScrollViewer}">
-                                        <ItemsControl x:Name="HistoryRangeList" ItemTemplate="{StaticResource HistoryAppRowTemplate}" />
-                                    </ScrollViewer>
+                                    <ItemsControl x:Name="HistoryRangeList" Style="{StaticResource VirtualList}" ItemTemplate="{StaticResource HistoryAppRowTemplate}" />
                                 </DockPanel>
                             </Grid>
                         </Grid>

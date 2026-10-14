@@ -206,23 +206,28 @@ public partial class MainWindow
     private void ShowRange(DateTime from, DateTime to, bool final)
     {
         bool minutely = (to - from).TotalHours > 24;
-        var data = new HistoryData(new(), new(), new());
+        // A drag redraws ~60 times a second: its frames refill the same lists instead of copying a day's
+        // hundred thousand rows into new ones each time — that garbage forced a full collection several
+        // times a second, freezing the window for a second or more. The final view gets lists of its own,
+        // which the background ranking can read while the next drag reuses these.
+        var data = final ? new HistoryData(new(), new(), new()) : _dragData;
+        var before = final ? new List<SysSample>() : _dragBefore;
+        if (!final) { data.System.Clear(); data.Processes.Clear(); data.Events.Clear(); before.Clear(); }
         bool complete = true;
         DateTime fromUtc = from.ToUniversalTime(), toUtc = to.ToUniversalTime();
         for (var day = from.Date; day <= to.Date; day = day.AddDays(1))
         {
             if (!_dayCache.TryGetValue((day, minutely), out var cached)) { RequestDay(day, minutely); complete = false; continue; }
-            data.System.AddRange(Slice(cached.Data.System, s => s.Time, fromUtc, toUtc));
-            data.Processes.AddRange(Slice(cached.Data.Processes, p => p.Time, fromUtc, toUtc));
-            data.Events.AddRange(Slice(cached.Data.Events, e => e.Time, fromUtc, toUtc));
+            AddSlice(data.System, cached.Data.System, s => s.Time, fromUtc, toUtc);
+            AddSlice(data.Processes, cached.Data.Processes, p => p.Time, fromUtc, toUtc);
+            AddSlice(data.Events, cached.Data.Events, e => e.Time, fromUtc, toUtc);
         }
 
-        var before = new List<SysSample>();
         if (_compare)
             for (var day = (from - (to - from)).Date; day <= from.Date; day = day.AddDays(1))
             {
                 if (!_dayCache.TryGetValue((day, minutely), out var cached)) { RequestDay(day, minutely); complete = false; continue; }
-                before.AddRange(Slice(cached.Data.System, s => s.Time, (from - (to - from)).ToUniversalTime(), fromUtc.AddTicks(-1)));
+                AddSlice(before, cached.Data.System, s => s.Time, (from - (to - from)).ToUniversalTime(), fromUtc.AddTicks(-1));
             }
 
         (_historyFrom, _historyTo, _historyMinutely, _hist, _before) = (from, to, minutely, data, before);
@@ -232,20 +237,35 @@ public partial class MainWindow
             + (_sourceError != null ? $" · {_source?.Name ?? "history"}: {_sourceError}" : !complete ? " · loading…" : data.System.Count == 0 ? " · nothing recorded" : "")
             + (minutely ? " · per-minute peaks (click to zoom in to every second)" : "");
         DrawHistory();
-        if (final || complete) UpdateRangeList(); // skipped mid-drag only while a day is still loading
+        if (final) UpdateRangeList(); // mid-drag the list waits for the release
     }
 
-    /// <summary>The part of a time-sorted list inside [from, to], found by binary search — no scan per frame.</summary>
-    private static IEnumerable<T> Slice<T>(List<T> sorted, Func<T, DateTime> time, DateTime from, DateTime to)
+    private readonly HistoryData _dragData = new(new(), new(), new());
+    private readonly List<SysSample> _dragBefore = new();
+
+    /// <summary>Adds the part of a time-sorted list inside [from, to], found by binary search — no scan, no copy in between.</summary>
+    private static void AddSlice<T>(List<T> into, List<T> sorted, Func<T, DateTime> time, DateTime from, DateTime to)
     {
-        int Lower(DateTime t)
-        {
-            int lo = 0, hi = sorted.Count;
-            while (lo < hi) { int mid = (lo + hi) / 2; if (time(sorted[mid]) < t) lo = mid + 1; else hi = mid; }
-            return lo;
-        }
-        int start = Lower(from), end = Lower(to.AddTicks(1));
-        return sorted.GetRange(start, end - start);
+        int start = Lower(sorted, time, from), end = Lower(sorted, time, to.AddTicks(1));
+        into.AddRange(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(sorted).Slice(start, end - start));
+    }
+
+    /// <summary>The index of the first item at or after <paramref name="t"/> in a time-sorted list.</summary>
+    private static int Lower<T>(List<T> sorted, Func<T, DateTime> time, DateTime t)
+    {
+        int lo = 0, hi = sorted.Count;
+        while (lo < hi) { int mid = (lo + hi) / 2; if (time(sorted[mid]) < t) lo = mid + 1; else hi = mid; }
+        return lo;
+    }
+
+    // Work that can wait for a quiet moment: queued once at Background priority, below input and rendering,
+    // so a mouse sweep or a drag never waits for it — it runs when the UI has time, with the latest state.
+    private readonly HashSet<string> _queued = new();
+
+    private void Later(string key, Action action)
+    {
+        if (!_queued.Add(key)) return;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => { _queued.Remove(key); action(); });
     }
 
     private void RequestDay(DateTime day, bool minutely)
@@ -278,6 +298,7 @@ public partial class MainWindow
 
     private void UpdateRangeList()
     {
+        int ticket = ++_rangeTicket; // a ranking still running for an older call mustn't land after this one
         bool energyMetric = _historyMetric is "power" or "battery";
         HistoryMeasuredCheck.Visibility = energyMetric ? Visibility.Visible : Visibility.Collapsed;
         if (energyMetric && HistoryMeasuredCheck.IsChecked == true)
@@ -294,39 +315,46 @@ public partial class MainWindow
         }
         HistoryRangeTitle.Text = $"TOP APPS IN THIS RANGE (AVERAGE {MetricLabel().ToUpperInvariant()})";
         UpdateEnergyText();
-        if (ListMetric == "fps")
+        // A day holds a hundred thousand app rows: ranked off the UI thread, so a refresh never stalls it.
+        var hist = _hist;
+        string metric = _historyMetric, sortKey = SortKey();
+        double price = _kwhPrice, hours = ListMetric == "watts" && !double.IsNaN(price) ? RangeEnergy().Hours : 0;
+        Func<List<OptionItem>> rank = ListMetric switch
         {
             // Averaged over the moments each app drew, not the whole range: a game played for ten minutes
             // of a day still reads its own frame rate. The low is the worst moment recorded.
-            HistoryRangeList.ItemsSource = _hist.Processes.Where(p => p.Fps >= 1).GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            "fps" => () => hist.Processes.Where(p => p.Fps >= 1).GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(g => (Name: g.Key, Avg: g.Average(p => p.Fps), Low: g.Min(p => p.Fps), Minutes: g.Count()))
                 .OrderByDescending(t => t.Minutes).Take(10)
-                .Select(t => new OptionItem { Name = t.Name, Description = $"lowest {t.Low:0} FPS", Note = $"{t.Avg:0} FPS" }).ToList();
-            return;
-        }
-        if (ListMetric == "watts")
+                .Select(t => new OptionItem { Name = t.Name, Description = $"lowest {t.Low:0} FPS", Note = $"{t.Avg:0} FPS" }).ToList(),
+            "watts" => () =>
+            {
+                int snapshots = Math.Max(1, hist.Processes.Select(p => p.Time).Distinct().Count());
+                return hist.Processes.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => (Name: g.Key, Watts: g.Sum(p => WattsOf(p, hist.System)) / snapshots, PeakCpu: g.Max(p => p.Cpu), PeakGpu: g.Max(p => p.Gpu)))
+                    .Where(t => t.Watts > 0).OrderByDescending(t => t.Watts).Take(10)
+                    .Select(t => new OptionItem
+                    {
+                        Name = t.Name,
+                        Description = $"CPU peak {t.PeakCpu:0}%" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
+                        // An app's share of the bill: its average watts over the hours recorded here.
+                        Note = $"{t.Watts:0.0} W" + (double.IsNaN(price) ? "" : $" · {Money(t.Watts * hours / 1000 * price)}"),
+                    }).ToList();
+            },
+            _ => () => HistoryStore.TopProcesses(hist.Processes, sortKey).Select(t => new OptionItem
+            {
+                Name = t.Name,
+                Description = $"CPU peak {t.PeakCpu:0}% · {FormatMB(t.PeakRamMB)} peak" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
+                Note = metric switch { "mem" => FormatMB(t.AvgRamMB), "gpu" => $"{t.AvgGpu:0.0}% GPU", _ => $"{t.AvgCpu:0.0}% CPU" },
+            }).ToList(),
+        };
+        Task.Run(rank).ContinueWith(t =>
         {
-            int snapshots = Math.Max(1, _hist.Processes.Select(p => p.Time).Distinct().Count());
-            HistoryRangeList.ItemsSource = _hist.Processes.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(g => (Name: g.Key, Watts: g.Sum(WattsOf) / snapshots, PeakCpu: g.Max(p => p.Cpu), PeakGpu: g.Max(p => p.Gpu)))
-                .Where(t => t.Watts > 0).OrderByDescending(t => t.Watts).Take(10)
-                .Select(t => new OptionItem
-                {
-                    Name = t.Name,
-                    Description = $"CPU peak {t.PeakCpu:0}%" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
-                    // An app's share of the bill: its average watts over the hours recorded here.
-                    Note = $"{t.Watts:0.0} W" + (double.IsNaN(_kwhPrice) ? "" : $" · {Money(t.Watts * RangeEnergy().Hours / 1000 * _kwhPrice)}"),
-                }).ToList();
-            return;
-        }
-        HistoryRangeList.ItemsSource = HistoryStore.TopProcesses(_hist.Processes, SortKey()).Select(t => new OptionItem
-        {
-            Name = t.Name,
-            Description = $"CPU peak {t.PeakCpu:0}% · {FormatMB(t.PeakRamMB)} peak" + (t.PeakGpu >= 1 ? $" · GPU peak {t.PeakGpu:0}%" : ""),
-            Note = _historyMetric switch { "mem" => FormatMB(t.AvgRamMB), "gpu" => $"{t.AvgGpu:0.0}% GPU", _ => $"{t.AvgCpu:0.0}% CPU" },
-        }).ToList();
+            if (ticket == _rangeTicket) HistoryRangeList.ItemsSource = t.Result; // else the range moved on: a newer ranking follows
+        }, CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
+    private int _rangeTicket;
     private System.Windows.Threading.DispatcherTimer? _measuredTimer;
     private int _measuredRequest;
 
@@ -419,9 +447,11 @@ public partial class MainWindow
     /// An app's estimated draw: the CPU's watts split by each app's share of the CPU use, the same for the GPU —
     /// the way Task Manager's "Power usage" guesses it. Screen, Wi-Fi and the rest of the board aren't counted.
     /// </summary>
-    private float WattsOf(ProcSample p)
+    private float WattsOf(ProcSample p) => WattsOf(p, _hist.System);
+
+    private static float WattsOf(ProcSample p, List<SysSample> system)
     {
-        var s = Nearest(_hist.System, p.Time, x => x.Time);
+        var s = Nearest(system, p.Time, x => x.Time);
         static float Part(float app, float total, float watts) =>
             app > 0 && watts > 0 && total > 0 ? Math.Min(1, app / total) * watts : 0;
         return Part(p.Cpu, s.Cpu, s.CpuWatts) + Part(p.Gpu, s.Gpu, s.GpuWatts);
@@ -437,14 +467,24 @@ public partial class MainWindow
     /// <summary>Percent metrics fill a fixed 0-100 %; disk, network and an app's memory scale to what's on screen.</summary>
     private bool InPercent => _historyApp == null ? IsPercentMetric(_historyMetric) : _historyMetric is "cpu" or "gpu";
     private static bool IsPercentMetric(string metric) => metric is "cpu" or "mem" or "gpu" or "battery";
-    private static float Raw(SysSample s, string metric) => metric switch
+    private static float Raw(SysSample s, string metric) => RawOf(metric)(s);
+
+    /// <summary>The reading a metric plots, picked once — a chart reads it for every one of a day's 86,400 samples.</summary>
+    private static Func<SysSample, float> RawOf(string metric) => metric switch
     {
-        "mem" => s.Mem, "gpu" => s.Gpu, "disk" => s.DiskMBs, "net" => s.NetMbps, "fan" => s.FanRpm, "battery" => s.BatteryPct, "fps" => s.Fps,
-        "power" => float.IsNaN(s.CpuWatts) ? s.GpuWatts : float.IsNaN(s.GpuWatts) ? s.CpuWatts : s.CpuWatts + s.GpuWatts,
-        _ => s.Cpu,
+        "mem" => s => s.Mem, "gpu" => s => s.Gpu, "disk" => s => s.DiskMBs, "net" => s => s.NetMbps, "fan" => s => s.FanRpm,
+        "battery" => s => s.BatteryPct, "fps" => s => s.Fps,
+        "power" => s => float.IsNaN(s.CpuWatts) ? s.GpuWatts : float.IsNaN(s.GpuWatts) ? s.CpuWatts : s.CpuWatts + s.GpuWatts,
+        _ => s => s.Cpu,
     };
+
     /// <summary>The plotted value, 0-100 of the chart's height.</summary>
-    private float Metric(SysSample s) => (float)(Raw(s, _historyMetric) / _scale * 100);
+    private Func<SysSample, float> PlotOf()
+    {
+        var raw = RawOf(_historyMetric);
+        float k = (float)(100 / _scale);
+        return s => raw(s) * k;
+    }
     private string FormatValue(double v) => InPercent
         ? (v < 10 ? $"{v:0.0}%" : $"{v:0}%")
         : _historyMetric switch { "disk" => $"{v:0.#} MB/s", "net" => $"{v:0.#} Mbps", "power" => $"{v:0} W", "fan" => $"{v:0} RPM", "fps" => $"{v:0} FPS", _ => FormatMB(v) };
@@ -562,7 +602,8 @@ public partial class MainWindow
         foreach (var (a, b) in gaps) DrawGap(c, X(a), X(b), top, bottom, ClassifyGap(a, b));
 
         // The metric as each 4px column's peak — a spike survives any zoom level (see SmoothRuns).
-        var peaks = Bucket(samples, Metric, cols);
+        var metric = PlotOf();
+        var peaks = Bucket(samples, metric, cols);
         // An app's line comes from the snapshots, 10 s apart: bridge across them, not just a skipped second.
         int bridge = (int)((_historyApp != null && !_historyMinutely ? Math.Max(25, gapLimit) : gapLimit) / cols.Seconds);
         BridgeShortGaps(peaks, bridge);
@@ -586,7 +627,7 @@ public partial class MainWindow
         if (before != null)
         {
             // The stretch before, laid over this one: a quiet dashed line under the real one.
-            var beforePeaks = Bucket(before, Metric, cols);
+            var beforePeaks = Bucket(before, metric, cols);
             BridgeShortGaps(beforePeaks, bridge);
             var beforePath = new Path
             {
@@ -648,6 +689,7 @@ public partial class MainWindow
         _cursorValue.SetResourceReference(Border.BackgroundProperty, "SurfaceElevated");
         _cursorValue.SetResourceReference(Border.BorderBrushProperty, "ButtonBorder");
         _cursorValue.SetResourceReference(Border.CornerRadiusProperty, "PopupRadius");
+        _cardColumn = -1;
         c.Children.Add(_cursorValue);
         // A live refresh or a drag frame rebuilds the chart: put the pin (or the resting mouse's cursor) back.
         if (_pinnedUtc is DateTime pin && pin >= fromUtc && pin <= _historyTo.ToUniversalTime()) PlaceCursor(X(pin), pinned: true);
@@ -732,11 +774,16 @@ public partial class MainWindow
     {
         var peaks = new float[cols.Count];
         Array.Fill(peaks, float.NaN);
-        foreach (var s in samples)
+        long origin = cols.Origin.Ticks;
+        double ticksPerColumn = cols.Seconds * TimeSpan.TicksPerSecond;
+        foreach (ref readonly var s in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(samples))
         {
-            int b = (int)Math.Floor((s.Time - cols.Origin).TotalSeconds / cols.Seconds);
+            long offset = s.Time.Ticks - origin;
+            if (offset < 0) continue;
+            int b = (int)(offset / ticksPerColumn);
+            if (b >= cols.Count) continue;
             float v = value(s);
-            if (b < 0 || b >= cols.Count || float.IsNaN(v)) continue;
+            if (float.IsNaN(v)) continue;
             peaks[b] = float.IsNaN(peaks[b]) ? v : Math.Max(peaks[b], v);
         }
         return peaks;
@@ -785,7 +832,7 @@ public partial class MainWindow
     private void DrawTemperatureBand(Canvas c, double centerY, Columns cols, int bridge)
     {
         int buckets = cols.Count;
-        var temps = Bucket(_hist.System, MetricTemp, cols);
+        var temps = Bucket(_hist.System, _historyMetric is "gpu" or "fps" ? s => s.GpuTemp : s => s.CpuTemp, cols);
         BridgeShortGaps(temps, bridge);
         if (temps.All(float.IsNaN)) return;
         _chartTemps = temps;
@@ -928,7 +975,7 @@ public partial class MainWindow
         }
         if (_pinnedUtc != null) return; // pinned: everything stays on the pinned moment
         PlaceCursor(x, pinned: false);
-        ShowDetailsAt(TimeAt(x), pinned: false);
+        Later("details", () => { if (_pinnedUtc == null && _hoverX is double hx) ShowDetailsAt(TimeAt(hx), pinned: false); });
     }
 
     private void HistoryChart_MouseLeave(object sender, MouseEventArgs e)
@@ -1139,6 +1186,9 @@ public partial class MainWindow
     }
 
     /// <summary>The readings and the running apps at a moment, in the panel under the chart.</summary>
+    private object? _detailsShown;
+    private int _cardColumn = -1; // the chart column the cursor card was filled for; -1 after a redraw // what the panel under the chart shows now, to skip rebuilding the same
+
     private void ShowDetailsAt(DateTime time, bool pinned)
     {
         double span = (_historyTo - _historyFrom).TotalSeconds;
@@ -1151,7 +1201,12 @@ public partial class MainWindow
         else
             HistoryCursorTitle.Text = $"{prefix}{time.ToLocalTime():ddd HH:mm:ss} — nothing recorded{suffix}";
 
-        HistoryCursorList.ItemsSource = ProcessesAt(time, tolerance)?.OrderByDescending(MetricOf)
+        var apps = ProcessesAt(time, tolerance);
+        // Apps are recorded every 10 s: most mouse moves land on the same snapshot as the last one.
+        var shown = (_hist, apps is { Count: > 0 } ? apps[0].Time : default(DateTime?), ListMetric);
+        if (Equals(shown, _detailsShown)) return;
+        _detailsShown = shown;
+        HistoryCursorList.ItemsSource = apps?.OrderByDescending(MetricOf)
             .Select(p => new OptionItem
             {
                 Name = p.Name,
@@ -1170,13 +1225,19 @@ public partial class MainWindow
         _histProcsDirty = false;
     }
 
-    /// <summary>The apps recorded nearest a moment (every 10 s, every 2 s in a spike), or null if none is close.</summary>
+    /// <summary>
+    /// The apps recorded nearest a moment (every 10 s, every 2 s in a spike), or null if none is close. A binary
+    /// search in the range's time-sorted rows: no index to rebuild each time the range refreshes.
+    /// </summary>
     private List<ProcSample>? ProcessesAt(DateTime time, double tolerance)
     {
-        EnsureProcessIndex();
-        if (_histProcTimes.Count == 0) return null;
-        var at = Nearest(_histProcTimes, time, t => t);
-        return Math.Abs((at - time).TotalSeconds) > Math.Max(60, tolerance) ? null : _histProcs[at];
+        var rows = _hist.Processes;
+        if (rows.Count == 0) return null;
+        int i = Lower(rows, p => p.Time, time);
+        var at = i == rows.Count || (i > 0 && time - rows[i - 1].Time < rows[i].Time - time) ? rows[i - 1].Time : rows[i].Time;
+        if (Math.Abs((at - time).TotalSeconds) > Math.Max(60, tolerance)) return null;
+        int start = Lower(rows, p => p.Time, at);
+        return rows.GetRange(start, Lower(rows, p => p.Time, at.AddTicks(1)) - start);
     }
 
     /// <summary>
@@ -1194,7 +1255,8 @@ public partial class MainWindow
         Canvas.SetLeft(_cursorDot, cx - _cursorDot.Width / 2);
         Canvas.SetTop(_cursorDot, cy - _cursorDot.Height / 2);
         float temp = b < _chartTemps.Length ? _chartTemps[b] : float.NaN;
-        FillCursorCard(TimeAt(x), v, temp);
+        // A column is a few pixels wide and the card says the same across it: rebuild it only on a new one.
+        if (_cardColumn != b) { _cardColumn = b; FillCursorCard(TimeAt(x), v, temp); }
         // Beside the cursor, flipped to the left near the right edge. Its height isn't known until layout, so it
         // hangs from the top when the curve is high and stands on the bottom (above the temperature band) when
         // it's low — either way it stays inside the chart without measuring it.

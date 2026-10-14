@@ -416,7 +416,7 @@ public sealed class RemoteHistory
     private static readonly HttpClient SlowHttp = new() { Timeout = TimeSpan.FromHours(1) }; // installs: upload, download, run
 
     private readonly Dictionary<(DateTime Day, bool Minutes), string> _finished = new();
-    private readonly StringBuilder _today = new();
+    private HistoryData _today = new(new(), new(), new()); // today's raw rows, parsed as they arrive
     private DateTime _todayDay;
     private long _todayAfter;
     private HashSet<string> _lastFetch = new();
@@ -486,25 +486,31 @@ public sealed class RemoteHistory
             if (day < DateTime.Today)
             {
                 if (!_finished.TryGetValue((day, minutes), out text!))
+                {
+                    if (_finished.Count >= 12) _finished.Remove(_finished.Keys.First()); // a few MB a day: don't keep a month of them
                     _finished[(day, minutes)] = text = Get($"day?date={day:yyyy-MM-dd}&kind={(minutes ? "min" : "raw")}");
+                }
             }
             else if (minutes) text = Get($"day?date={day:yyyy-MM-dd}&kind=min"); // today's summary is small
             else
             {
-                if (_todayDay != day) { _today.Clear(); _todayAfter = 0; _lastFetch.Clear(); _todayDay = day; }
+                if (_todayDay != day) { _today = new(new(), new(), new()); _todayAfter = 0; _lastFetch.Clear(); _todayDay = day; }
                 // A launch event carries the moment the app appeared, ~10 s before it's written: ask from 30 s
                 // before the newest line seen, and skip what the previous answer (which covered that stretch) had.
+                // Only the new lines are parsed; the day so far stays parsed.
                 string fresh = Get($"day?date={day:yyyy-MM-dd}&kind=raw&after={Math.Max(0, _todayAfter - 30)}");
                 var fetched = new HashSet<string>();
+                var added = new StringBuilder();
                 foreach (var line in fresh.Split('\n'))
                 {
                     if (line.Length == 0 || !fetched.Add(line)) continue;
-                    if (!_lastFetch.Contains(line)) _today.Append(line).Append('\n');
+                    if (!_lastFetch.Contains(line)) added.Append(line).Append('\n');
                     var f = line.Split(',');
                     if (f.Length > 1 && long.TryParse(f[1], NumberStyles.None, CultureInfo.InvariantCulture, out long t) && t > _todayAfter) _todayAfter = t;
                 }
                 _lastFetch = fetched;
-                text = _today.ToString();
+                HistoryStore.Append(_today, HistoryStore.Parse(new StringReader(added.ToString())));
+                return HistoryStore.Copy(_today);
             }
         }
         return HistoryStore.Parse(new StringReader(text));
