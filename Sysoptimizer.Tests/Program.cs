@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using Sysoptimizer.Services;
 
 // Exercises HistoryStore in a temp folder: writing and reading back, files from before disk/network were
@@ -358,6 +359,49 @@ try
                                          "VLC media player           VideoLAN.VLC               3.0.24     Moniker: vlc winget\r\n" +
                                          "VLC media player (Nightly) VideoLAN.VLC.Nightly       4.0.0.0               winget\r\n");
     Check(table.Count == 2 && table[0] == ("VLC media player", "VideoLAN.VLC", "3.0.24") && table[1].Id == "VideoLAN.VLC.Nightly", "winget: the search table parsed by column position");
+
+    // 8. The Protagonist Labs shared folder: the card, garbage tolerated, and Shelf's games' sessions from the history.
+    string eco = Path.Combine(folder, "eco"), ecoHistory = Path.Combine(folder, "eco-history");
+    Directory.CreateDirectory(ecoHistory);
+    Ecosystem.Folder = eco;
+    HistoryStore.Folder = ecoHistory;
+    string self = Environment.ProcessPath!;
+    Ecosystem.WriteCard(self, new Version(1, 14, 0));
+    var card = Ecosystem.Card("sysoptimizer");
+    Check(card?["version"]?.ToString() == "1.14.0" && card["edition"]?.ToString() == "free" && card["updated"] != null
+          && !File.ReadAllBytes(Path.Combine(eco, "apps", "sysoptimizer.json")).Take(3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }), "ecosystem: the card, schema 1, no BOM");
+    File.WriteAllText(Path.Combine(eco, "apps", "shelf.json"), "{ not json");
+    File.WriteAllText(Path.Combine(eco, "apps", "stash.json"), "{\"schema\":2,\"exe\":" + JsonSerializer.Serialize(self) + "}");
+    File.WriteAllText(Path.Combine(eco, "apps", "reel.json"), "{\"schema\":1,\"paid\":true,\"edition\":\"full\",\"exe\":" + JsonSerializer.Serialize(@"C:\gone\Reel.exe") + "}");
+    Check(Ecosystem.Card("shelf") == null && Ecosystem.Card("stash") == null && Ecosystem.Card("reel") == null && Ecosystem.Card("nobody") == null && !Ecosystem.BoughtSomething(),
+          "ecosystem: broken, wrong-schema, uninstalled and missing cards read as absent");
+    File.WriteAllText(Path.Combine(eco, "apps", "reel.json"), "{\"schema\":1,\"paid\":true,\"edition\":\"full\",\"exe\":" + JsonSerializer.Serialize(self) + "}");
+    Check(Ecosystem.BoughtSomething(), "ecosystem: a bought app is seen");
+
+    Directory.CreateDirectory(Path.Combine(eco, "data"));
+    string shared = Path.Combine(eco, "data", "sysoptimizer.games.json");
+    File.WriteAllText(Path.Combine(eco, "data", "shelf.games.json"), "garbage");
+    Ecosystem.WriteGames();
+    Check(!File.Exists(shared), "ecosystem: no games file without a readable shelf.games.json");
+
+    var played = DateTime.Today.AddDays(-1);
+    long y0 = Unix(played.AddHours(20));
+    File.WriteAllText(Path.Combine(ecoHistory, $"{played:yyyy-MM-dd}.csv"),
+        $"S,{y0},50,40,90,70,60\nP,{y0},Game,30,4000,90,60\nP,{y0},chrome,5,900,1,\nP,{y0 + 10},game,30,4000,90,120\nP,{y0 + 70},Game,30,4000,90,\nP,{y0 + 80},Game,30,4000,90,0.4\n");
+    long t1h = Unix(DateTime.Today.AddHours(1));
+    File.WriteAllText(Path.Combine(ecoHistory, $"{DateTime.Today:yyyy-MM-dd}.csv"), $"P,{t1h},Game,30,4000,90,30\nP,{t1h + 600},Game,3"); // a torn last line
+    File.WriteAllText(Path.Combine(ecoHistory, $"{DateTime.Today.AddDays(-30):yyyy-MM-dd}.csv"), $"P,{Unix(DateTime.Today.AddDays(-30).AddHours(1))},Game,30,4000,90,30\n");
+    File.WriteAllText(Path.Combine(eco, "data", "shelf.games.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1,
+        games = new object[] { new { id = "g1", name = "My Game", exe = @"C:\Games\Game.exe" }, new { id = "g2", name = "Never run", exe = @"C:\x\Other.exe" }, new { id = "g3", name = "No exe" } },
+    }));
+    Ecosystem.WriteGames();
+    var sessions = (Ecosystem.Read(shared)?["sessions"] as System.Text.Json.Nodes.JsonArray)?.Select(n => n!.AsObject()).ToList() ?? new();
+    Check(sessions.Count == 2 && sessions.All(x => x["name"]!.ToString() == "My Game" && x["exe"]!.ToString() == @"C:\Games\Game.exe"), "ecosystem: one session per day played, for Shelf's game only, 30 days back");
+    Check(sessions.Count == 2 && sessions[0]["date"]!.ToString() == $"{played:yyyy-MM-dd}" && (int)sessions[0]["minutes"]! == 2
+          && (double)sessions[0]["avgFps"]! == 90 && (double)sessions[0]["maxFps"]! == 120, "ecosystem: minutes seen, average and best FPS (blank and under 1 ignored, name case ignored)");
+    Check(sessions.Count == 2 && (int)sessions[1]["minutes"]! == 1 && (double)sessions[1]["avgFps"]! == 30, "ecosystem: today counts, its unfinished last line doesn't");
 }
 catch (Exception ex)
 {

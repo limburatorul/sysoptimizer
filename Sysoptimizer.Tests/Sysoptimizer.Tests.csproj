@@ -19,6 +19,7 @@
     <Compile Include="..\Sysoptimizer\Services\AppLog.cs" Link="AppLog.cs" />
     <Compile Include="..\Sysoptimizer\Services\ChangeService.cs" Link="ChangeService.cs" />
     <Compile Include="..\Sysoptimizer\Services\InsightService.cs" Link="InsightService.cs" />
+    <Compile Include="..\Sysoptimizer\Services\Ecosystem.cs" Link="Ecosystem.cs" />
   </ItemGroup>
 
 </Project>

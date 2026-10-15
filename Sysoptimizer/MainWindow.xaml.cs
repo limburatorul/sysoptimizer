@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -85,7 +86,7 @@ public partial class MainWindow : Window
         // drawing 60 frames a second even with the window hidden in the tray, where it lives most of the day.
         IsVisibleChanged += (_, _) => UpdateRenderingHook();
         StateChanged += (_, _) => UpdateRenderingHook();
-        Tabs.SelectionChanged += (_, e) => { if (e.Source == Tabs) UpdateRenderingHook(); };
+        Tabs.SelectionChanged += (_, e) => { if (e.Source == Tabs) { UpdateRenderingHook(); if (Tabs.SelectedItem == AboutTab) RefreshWorksWith(); } };
 
         ApplyRoundedClip(CpuCardBorder);
         ApplyRoundedClip(MemCardBorder);
@@ -168,6 +169,63 @@ public partial class MainWindow : Window
     {
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
         e.Handled = true;
+    }
+
+    // --- Works with: the other Protagonist Labs apps on this PC (see Ecosystem) ---
+
+    private static readonly (string Id, string Name)[] PaidApps = { ("shelf", "Shelf"), ("stash", "Stash"), ("frostpane", "Frostpane"), ("reel", "Reel"), ("planner", "Planner"), ("reminder", "Reminder") };
+
+    /// <summary>Re-read each time About opens: an app installed meanwhile shows up, one removed goes. Quiet on purpose — hint text, the names the only links.</summary>
+    private void RefreshWorksWith()
+    {
+        const string utm = "utm_source=sysoptimizer&utm_medium=app&utm_campaign=works-with";
+        WorksWithList.Children.Clear();
+        if (Ecosystem.Card("shelf")?["exe"]?.ToString() is { } shelf) // Card checked it is a path that exists
+            AddWorksWith(Link("Shelf", () => OpenUnelevated(shelf)), " · shows how each of your games ran here (minutes played, average FPS) on its page");
+        else
+            AddWorksWith(Link("Shelf", () => OpenUrl($"https://protagonistlabs.app/shelf/?{utm}")), " · would show how each of your games ran here (minutes played, average FPS) on its page");
+
+        if (!Ecosystem.BoughtSomething()) return;
+        var missing = PaidApps.Where(a => Ecosystem.Card(a.Id) == null).Take(4).ToList();
+        if (missing.Count == 0) return;
+        var line = AddWorksWith(new Run("Owners of one of our apps get 30% off the others: "), "");
+        line.Margin = new Thickness(0, 6, 0, 0);
+        foreach (var (id, name) in missing)
+        {
+            if (id != missing[0].Id) line.Inlines.Add(new Run(" · "));
+            line.Inlines.Add(Link(name, () => OpenUrl($"https://protagonistlabs.app/{id}/?code={(id == "shelf" ? "SECOND30SHELF" : "SECOND30")}&{utm}")));
+        }
+    }
+
+    private System.Windows.Controls.TextBlock AddWorksWith(Inline first, string rest)
+    {
+        var line = new System.Windows.Controls.TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 2, 0, 2) };
+        line.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "TextSecondary"); // follows a theme change
+        line.Inlines.Add(first);
+        if (rest != "") line.Inlines.Add(new Run(rest));
+        WorksWithList.Children.Add(line);
+        return line;
+    }
+
+    /// <summary>A name in the line's own colour, underlined only under the pointer.</summary>
+    private static Hyperlink Link(string text, Action open)
+    {
+        var link = new Hyperlink(new Run(text)) { TextDecorations = null, Cursor = System.Windows.Input.Cursors.Hand };
+        link.SetResourceReference(TextElement.ForegroundProperty, "TextSecondary");
+        link.MouseEnter += (_, _) => link.TextDecorations = TextDecorations.Underline;
+        link.MouseLeave += (_, _) => link.TextDecorations = null;
+        link.Click += (_, _) => open();
+        return link;
+    }
+
+    private static void OpenUrl(string url) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+
+    /// <summary>Sysoptimizer runs elevated; started through Explorer, the sister app runs as the user, like from Start.</summary>
+    private static void OpenUnelevated(string exe)
+    {
+        try { System.Diagnostics.Process.Start(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), $"\"{exe}\""); }
+        catch (System.ComponentModel.Win32Exception) { } // gone since the card was read
     }
 
     // --- Updates ---

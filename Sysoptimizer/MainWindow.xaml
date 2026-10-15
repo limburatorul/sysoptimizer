@@ -928,7 +928,7 @@
                     </DockPanel>
                 </TabItem>
 
-                <TabItem Header="About">
+                <TabItem x:Name="AboutTab" Header="About">
                     <ScrollViewer Style="{StaticResource GlassScrollViewer}">
                         <StackPanel Margin="16" MaxWidth="640" HorizontalAlignment="Left">
                             <StackPanel.Resources>
@@ -975,6 +975,8 @@
                                     </Border>
                                 </StackPanel>
                             </Border>
+                            <TextBlock Style="{StaticResource CaseLabel}" Tag="Works with" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,24,0,8" />
+                            <StackPanel x:Name="WorksWithList" />
                             <TextBlock Style="{StaticResource CaseLabel}" Tag="Remote monitoring" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,24,0,8" />
                             <Border Padding="18,14" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                 <StackPanel>

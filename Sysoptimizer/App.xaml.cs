@@ -43,5 +43,25 @@ public partial class App : System.Windows.Application
         {
             while (showSignal.WaitOne()) Dispatcher.BeginInvoke(window.ShowFromTray);
         }) { IsBackground = true }.Start();
+
+        // The Protagonist Labs shared folder: our card now, Shelf's games' sessions now and every hour, and once
+        // more on the way out. Off the UI thread and at the lowest priority — the app itself runs at High.
+        new Thread(() =>
+        {
+            try { Ecosystem.WriteCard(Environment.ProcessPath ?? "", Updater.Current); }
+            catch (Exception ex) { AppLog.Write($"Couldn't write the app card: {ex.Message}"); }
+            while (true)
+            {
+                ShareGames();
+                Thread.Sleep(TimeSpan.FromHours(1));
+            }
+        }) { IsBackground = true, Priority = ThreadPriority.Lowest, Name = "Ecosystem" }.Start();
+        Exit += (_, _) => ShareGames();
+    }
+
+    private static void ShareGames()
+    {
+        try { Ecosystem.WriteGames(); }
+        catch (Exception ex) { AppLog.Write($"Couldn't share the games' sessions: {ex.Message}"); }
     }
 }
