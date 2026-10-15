@@ -20,6 +20,13 @@ public static class Updater
 
     public record Release(Version Version, string Tag, string Notes, string AssetUrl, long AssetSize, string? Sha256);
 
+    /// <summary>
+    /// A copy with no uninstaller beside it is the portable exe from the release. Updating it with the installer
+    /// put a new copy in Program Files and restarted the old portable one, which then offered the same update
+    /// again for ever; a portable copy is replaced by the release's portable exe instead.
+    /// </summary>
+    public static bool Portable => !File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
+
     public static Version Current => typeof(Updater).Assembly.GetName().Version is { } v ? new Version(v.Major, v.Minor, v.Build) : new Version(0, 0, 0);
     private static string? _dismissed; // tag the user said "Later" to; deliberately not persisted
 
@@ -49,7 +56,9 @@ public static class Updater
             var tag = root.GetProperty("tag_name").GetString() ?? "";
             if (!Version.TryParse(tag.TrimStart('v', 'V'), out var version)) return null;
             var asset = root.GetProperty("assets").EnumerateArray()
-                .FirstOrDefault(a => (a.GetProperty("name").GetString() ?? "").EndsWith("setup.exe", StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(a => Portable
+                    ? (a.GetProperty("name").GetString() ?? "").Equals("Sysoptimizer.exe", StringComparison.OrdinalIgnoreCase)
+                    : (a.GetProperty("name").GetString() ?? "").EndsWith("setup.exe", StringComparison.OrdinalIgnoreCase));
             if (asset.ValueKind != JsonValueKind.Object) return null;
             // GitHub publishes each asset's SHA-256 as "sha256:<hex>"; older assets have none.
             var digest = asset.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
@@ -68,7 +77,7 @@ public static class Updater
     /// <summary>Downloads the installer, reporting 0..1 progress. Returns its path.</summary>
     public static async Task<string> Download(Release release, IProgress<double>? progress, CancellationToken token)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"Sysoptimizer-{release.Version}-setup.exe");
+        var path = Path.Combine(Path.GetTempPath(), $"Sysoptimizer-{release.Version}{(Portable ? "" : "-setup")}.exe");
         using (var response = await Http.GetAsync(release.AssetUrl, HttpCompletionOption.ResponseHeadersRead, token))
         {
             response.EnsureSuccessStatusCode();
@@ -116,7 +125,7 @@ public static class Updater
             @echo off
             :wait
             tasklist /FI "PID eq {Environment.ProcessId}" | find "{Environment.ProcessId}" >nul && (timeout /t 1 /nobreak >nul & goto wait)
-            "{installer}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+            {(Portable ? $"move /y \"{installer}\" \"{exe}\" >nul" : $"\"{installer}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART")}
             start "" "{exe}"
             del "%~f0"
             """);
