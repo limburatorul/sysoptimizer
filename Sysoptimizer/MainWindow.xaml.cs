@@ -436,6 +436,7 @@ public partial class MainWindow : Window
             snap.CpuFrequencyGHz > 0 ? $"{snap.CpuFrequencyGHz:0.00} GHz" : null,
             double.IsNaN(snap.CpuTempC) ? null : $"{snap.CpuTempC:0}°C",
             double.IsNaN(snap.CpuWatts) ? null : $"{snap.CpuWatts:0} W",
+            Fan(snap, gpu: false),
             $"Up {FormatUptime(snap.UptimeSeconds)}",
         }.Where(s => s != null));
         PushHistory(_cpuHistory, snap.CpuPercent);
@@ -454,7 +455,7 @@ public partial class MainWindow : Window
         {
             GpuPercentText.Text = $"{snap.GpuPercent:0}%";
             GpuDetailText.Text = $"{snap.GpuMemUsedGB:0.#} GB VRAM{Temp(snap.GpuTempC)}" + (double.IsNaN(snap.GpuWatts) ? "" : $" · {snap.GpuWatts:0} W")
-                + (double.IsNaN(snap.Fps) ? "" : $" · {snap.Fps:0} FPS in {snap.FpsApp}");
+                + (Fan(snap, gpu: true) is { } gpuFan ? $" · {gpuFan}" : "") + (double.IsNaN(snap.Fps) ? "" : $" · {snap.Fps:0} FPS in {snap.FpsApp}");
             PushHistory(_gpuHistory, snap.GpuPercent);
         }
 
@@ -479,18 +480,19 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>The "Power &amp; cooling" card: draw, fans, and the battery on a laptop.</summary>
+    /// <summary>The fastest fan of the graphics card, or of the rest of the PC, as "fan 1,200 RPM"; null when none spins.</summary>
+    private static string? Fan(ResourceSnapshot snap, bool gpu) =>
+        snap.Fans.Where(f => f.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase) == gpu && f.Rpm > 0).Select(f => f.Rpm).DefaultIfEmpty().Max() is > 0 and var rpm
+            ? $"fan {rpm:N0} RPM" : null;
+
+    private bool _hasBattery;
+
+    /// <summary>The battery on a laptop, beside "Show last" (the CPU and GPU lines carry the watts and fans).</summary>
     private void ShowPower(ResourceSnapshot snap)
     {
-        bool cpuW = !double.IsNaN(snap.CpuWatts), gpuW = !double.IsNaN(snap.GpuWatts);
-        PowerText.Text = cpuW || gpuW
-            ? string.Join(" · ", new[] { cpuW ? $"CPU {snap.CpuWatts:0} W" : null, gpuW ? $"GPU {snap.GpuWatts:0} W" : null }.Where(s => s != null))
-              + (cpuW && gpuW ? $" · {snap.CpuWatts + snap.GpuWatts:0} W together" : "")
-            : "Power draw unavailable" + (double.IsNaN(snap.CpuTempC) ? " (needs the PawnIO driver)" : "");
-        FansText.Text = snap.Fans.Count > 0
-            ? "Fans: " + string.Join(" · ", snap.Fans.Select(f => $"{f.Name} {f.Rpm:0} RPM"))
-            : "No fan speeds reported";
-        HistoryMetricBattery.Visibility = BatteryText.Visibility = snap.Battery == null ? Visibility.Collapsed : Visibility.Visible;
+        _hasBattery = snap.Battery != null;
+        if (_historyApp == null) HistoryMetricBattery.IsEnabled = _hasBattery;
+        BatteryText.Visibility = _hasBattery ? Visibility.Visible : Visibility.Collapsed;
         if (snap.Battery is { } b)
             BatteryText.Text = $"Battery {b.Percent:0}% · " + (b.Charging ? "charging" : b.PluggedIn ? "plugged in" : "on battery")
                 + (double.IsNaN(b.Watts) ? "" : $" · {b.Watts:0.#} W")
@@ -603,7 +605,7 @@ public partial class MainWindow : Window
     private void UpdateRenderingHook()
     {
         bool wanted = IsVisible && WindowState != WindowState.Minimized
-                      && Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "Resources" or "Disks" or "Network" };
+                      && Tabs.SelectedItem is System.Windows.Controls.TabItem { Header: "Overview" or "Hardware" };
         if (wanted == _renderingHooked) return;
         _renderingHooked = wanted;
         if (wanted) CompositionTarget.Rendering += OnRendering;

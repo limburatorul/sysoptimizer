@@ -494,13 +494,36 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="MenuItem">
-                            <Border x:Name="Bd" Background="Transparent" CornerRadius="{DynamicResource ControlRadius}" Padding="12,6">
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Right" Text="{TemplateBinding InputGestureText}" Margin="24,0,0,0" Opacity="0.6" />
-                                    <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
-                                </DockPanel>
-                            </Border>
+                            <Grid>
+                                <Border x:Name="Bd" Background="Transparent" CornerRadius="{DynamicResource ControlRadius}" Padding="12,6">
+                                    <DockPanel>
+                                        <TextBlock x:Name="Arrow" DockPanel.Dock="Right" Text="›" Margin="24,0,0,0" Opacity="0.6" Visibility="Collapsed" />
+                                        <TextBlock x:Name="Check" DockPanel.Dock="Right" Text="✓" Margin="24,0,0,0" Foreground="{DynamicResource Accent}" Visibility="Collapsed" />
+                                        <TextBlock DockPanel.Dock="Right" Text="{TemplateBinding InputGestureText}" Margin="24,0,0,0" Opacity="0.6" />
+                                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
+                                <!-- a group's items: without this popup a submenu never opened -->
+                                <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="2" VerticalOffset="-5" AllowsTransparency="True" Focusable="False"
+                                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <Border Padding="0,0,10,10">
+                                        <Border Background="{DynamicResource SurfaceElevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                                                CornerRadius="{DynamicResource PopupRadius}" Padding="4" MinWidth="180">
+                                            <Border.Effect>
+                                                <DropShadowEffect BlurRadius="14" ShadowDepth="3" Direction="270" Opacity="0.45" Color="Black" />
+                                            </Border.Effect>
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                        </Border>
+                                    </Border>
+                                </Popup>
+                            </Grid>
                             <ControlTemplate.Triggers>
+                                <Trigger Property="Role" Value="SubmenuHeader">
+                                    <Setter TargetName="Arrow" Property="Visibility" Value="Visible" />
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                                </Trigger>
                                 <Trigger Property="IsHighlighted" Value="True">
                                     <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentDim}" />
                                 </Trigger>

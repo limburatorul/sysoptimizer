@@ -46,17 +46,18 @@ public static class CleanupService
         return (deleted, skipped, freed);
     }
 
-    private static IEnumerable<string> EnumerateFilesSafe(string root)
+    // The enumeration is lazy: a folder it may not open fails while it's being walked, not when it starts, so
+    // a try around the call caught nothing and one locked folder in %TEMP% crashed the app. Inaccessible
+    // folders are skipped as they come, and links aren't followed — cleaning must never reach outside the folder.
+    private static readonly EnumerationOptions Walk = new()
     {
-        try { return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories); }
-        catch { return Enumerable.Empty<string>(); }
-    }
+        RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint,
+    };
 
-    private static IEnumerable<string> EnumerateDirsSafe(string root)
-    {
-        try { return Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly); }
-        catch { return Enumerable.Empty<string>(); }
-    }
+    private static IEnumerable<string> EnumerateFilesSafe(string root) => Directory.EnumerateFiles(root, "*", Walk);
+
+    private static IEnumerable<string> EnumerateDirsSafe(string root) =>
+        Directory.EnumerateDirectories(root, "*", new EnumerationOptions { IgnoreInaccessible = true });
 
     public static string FormatSize(long bytes)
     {

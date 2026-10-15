@@ -143,9 +143,20 @@ public partial class MainWindow
 
     private string Money(double amount) => $"{amount:0.00} {_currency}".Trim();
 
+    private bool _energyOpen; // the price boxes were asked for, though no price is set yet
+
+    private void EnergyCostLink_Click(object sender, RoutedEventArgs e)
+    {
+        _energyOpen = true;
+        UpdateEnergyText();
+        EnergyPriceBox.Focus();
+    }
+
     private void UpdateEnergyText()
     {
-        EnergyPanel.Visibility = _historyMetric == "power" && _historyApp == null ? Visibility.Visible : Visibility.Collapsed;
+        bool power = _historyMetric == "power" && _historyApp == null;
+        EnergyPanel.Visibility = power && (_energyOpen || !double.IsNaN(_kwhPrice)) ? Visibility.Visible : Visibility.Collapsed;
+        EnergyCostLink.Visibility = power && EnergyPanel.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         if (EnergyPanel.Visibility != Visibility.Visible) return;
         var (kwh, hours) = RangeEnergy();
         if (hours <= 0) { EnergyText.Text = "Nothing recorded in this range."; return; }
@@ -1222,8 +1233,8 @@ public partial class MainWindow
     /// <summary>A width no pill offers: the pills no longer describe the window, so none stays lit.</summary>
     private void ClearRangePills()
     {
-        foreach (var pill in ((Panel)HistoryRange1h.Parent).Children.OfType<RadioButton>().Where(r => r.GroupName == "HistoryRange"))
-            pill.IsChecked = false;
+        foreach (var pill in HistoryRangePills.Children.OfType<RadioButton>()) pill.IsChecked = false;
+        HistoryRangeCombo.SelectedItem = HistoryRangeCustom;
     }
 
     private void Unpin()
@@ -1609,8 +1620,61 @@ public partial class MainWindow
     private void HistoryRange_Checked(object sender, RoutedEventArgs e)
     {
         _animateChart = true;
-        if (sender is RadioButton { Tag: string hours }) _historyHours = double.Parse(hours);
+        if (sender is RadioButton { Tag: string hours })
+        {
+            _historyHours = double.Parse(hours);
+            if (HistoryRangeCombo != null) // the first pill is checked while the window is still being built
+                HistoryRangeCombo.SelectedItem = HistoryRangeCombo.Items.OfType<ComboBoxItem>().First(i => (string)i.Tag == hours);
+        }
         if (IsLoaded) _ = LoadHistory();
+    }
+
+    private void HistoryRangeCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (HistoryRangeCombo.SelectedItem is ComboBoxItem { Tag: string { Length: > 0 } hours })
+            HistoryRangePills.Children.OfType<RadioButton>().First(r => (string)r.Tag == hours).IsChecked = true; // its Checked handler loads
+    }
+
+    /// <summary>FPS, disk, network, fans and battery: a list under "More", the pill lit while one of them is shown.</summary>
+    private void HistoryMetricMore_Click(object sender, RoutedEventArgs e)
+    {
+        ShowMoreMetric();
+        var menu = new ContextMenu { PlacementTarget = HistoryMetricMore, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach (var metric in HistoryMoreMetrics.Children.OfType<RadioButton>())
+        {
+            var item = new MenuItem { Header = metric.Content, IsChecked = metric.IsChecked == true, IsEnabled = metric.IsEnabled, ToolTip = metric.ToolTip };
+            item.Click += (_, _) => metric.IsChecked = true;
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void ShowMoreMetric()
+    {
+        var shown = HistoryMoreMetrics.Children.OfType<RadioButton>().FirstOrDefault(r => r.IsChecked == true);
+        HistoryMetricMore.IsChecked = shown != null;
+        HistoryMetricMore.Content = $"{shown?.Content ?? "More"} ▾";
+    }
+
+    /// <summary>The rarer History actions: how long the history is kept, Export, Report.</summary>
+    private void HistoryActions_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        var keep = new MenuItem { Header = "Keep the history for", IsEnabled = _source == null, ToolTip = "About 1.5 MB per day, packed; days past the limit are removed at midnight. This PC's own setting." };
+        foreach (var option in RetentionCombo.Items.OfType<ComboBoxItem>())
+        {
+            var item = new MenuItem { Header = ((string)option.Content).Replace("Keep ", ""), IsChecked = option.IsSelected };
+            item.Click += (_, _) => RetentionCombo.SelectedItem = option;
+            keep.Items.Add(item);
+        }
+        menu.Items.Add(keep);
+        var export = new MenuItem { Header = "Export…", ToolTip = "Save what the chart shows as CSV files (Excel opens them)" };
+        export.Click += ExportHistory_Click;
+        menu.Items.Add(export);
+        var report = new MenuItem { Header = "Report", ToolTip = "The last 7 days of this PC and every watched one, as a page in your browser (also made on its own every Monday)" };
+        report.Click += Report_Click;
+        menu.Items.Add(report);
+        menu.IsOpen = true;
     }
 
     private void HistoryCompare_Click(object sender, RoutedEventArgs e)
@@ -1654,6 +1718,7 @@ public partial class MainWindow
     {
         _animateChart = true;
         if (sender is RadioButton { Tag: string metric }) _historyMetric = metric;
+        if (HistoryMetricMore != null) ShowMoreMetric();
         if (IsLoaded) _ = LoadHistory();
     }
 
@@ -1673,7 +1738,8 @@ public partial class MainWindow
     private void HistoryAppClear_Click(object sender, RoutedEventArgs e)
     {
         _historyApp = null;
-        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = HistoryMetricPower.IsEnabled = HistoryMetricFan.IsEnabled = HistoryMetricBattery.IsEnabled = true;
+        HistoryMetricDisk.IsEnabled = HistoryMetricNet.IsEnabled = HistoryMetricPower.IsEnabled = HistoryMetricFan.IsEnabled = true;
+        HistoryMetricBattery.IsEnabled = _hasBattery;
         HistoryAppChip.Visibility = Visibility.Collapsed;
         _animateChart = true;
         DrawHistory();

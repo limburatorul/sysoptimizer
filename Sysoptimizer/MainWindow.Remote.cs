@@ -458,46 +458,45 @@ public partial class MainWindow
         if (targets.Count == 0) return;
         string who = targets.Count == 1 ? targets[0].Name : $"all {targets.Count} watched PCs";
         var menu = new ContextMenu { PlacementTarget = button, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
-        void Add(string header, string action, string? confirm = null)
+        MenuItem Group(string header)
         {
-            var item = new MenuItem { Header = header };
-            item.Click += async (_, _) =>
-            {
-                if (confirm != null && MessageBox.Show(this, confirm, "Sysoptimizer", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
-                await Task.WhenAll(targets.Select(target => RunOn(target, header.TrimEnd('…'), t => t.Run(action))));
-            };
-            menu.Items.Add(item);
+            var group = new MenuItem { Header = header };
+            menu.Items.Add(group);
+            return group;
         }
-        Add("Update all apps", "upgrade-all");
-        Add("Clean up temporary files", "cleanup");
-        Add("Update Sysoptimizer", "update-app");
-        var send = new MenuItem { Header = "Send files…", ToolTip = "Saved in its Downloads folder. You can also drop files on a PC's card." };
-        send.Click += async (_, _) =>
+        MenuItem Item(MenuItem group, string header, Action click, string? tip = null)
+        {
+            var item = new MenuItem { Header = header, ToolTip = tip };
+            item.Click += (_, _) => click();
+            group.Items.Add(item);
+            return item;
+        }
+        void Command(MenuItem group, string header, string action, string? confirm = null) => Item(group, header, async () =>
+        {
+            if (confirm != null && MessageBox.Show(this, confirm, "Sysoptimizer", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+            await Task.WhenAll(targets.Select(target => RunOn(target, header.TrimEnd('…'), t => t.Run(action))));
+        });
+
+        var apps = Group("Apps");
+        Command(apps, "Update all apps", "upgrade-all");
+        Command(apps, "Update Sysoptimizer", "update-app");
+        var files = Group("Files");
+        Item(files, "Send files…", async () =>
         {
             var dialog = new OpenFileDialog { Multiselect = true, Title = $"Send to {who}" };
             if (dialog.ShowDialog(this) == true) await SendFiles(targets, dialog.FileNames);
-        };
-        menu.Items.Add(send);
-        if (targets.Count == 1)
-        {
-            var get = new MenuItem { Header = "Get files…", ToolTip = "Copy files from its Downloads, Desktop or Documents to your Downloads" };
-            get.Click += (_, _) => GetFiles(targets[0]);
-            menu.Items.Add(get);
-        }
-        if (targets.Count == 1)
-        {
-            var log = new MenuItem { Header = "Its log…", ToolTip = "What Sysoptimizer did on that PC, and any error or crash — from its log file" };
-            log.Click += (_, _) => ShowLog(targets[0]);
-            menu.Items.Add(log);
-        }
+        }, "Saved in its Downloads folder. You can also drop files on a PC's line.");
+        if (targets.Count == 1) Item(files, "Get files…", () => GetFiles(targets[0]), "Copy files from its Downloads, Desktop or Documents to your Downloads");
+        var maintenance = Group("Maintenance");
+        Command(maintenance, "Clean up temporary files", "cleanup");
+        if (targets.Count == 1) Item(maintenance, "Its log…", () => ShowLog(targets[0]), "What Sysoptimizer did on that PC, and any error or crash — from its log file");
         menu.Items.Add(new Separator());
+        var power = Group("Power");
         bool wakeable = targets.Any(t => t.Macs.Length > 0);
-        var wake = new MenuItem { Header = "Wake up", IsEnabled = wakeable,
-            ToolTip = wakeable ? "Sends a Wake-on-LAN packet (it must be allowed in that PC's BIOS)" : "A PC's network address is learned once it answers with Sysoptimizer 1.9 or newer" };
-        wake.Click += async (_, _) => await Task.WhenAll(targets.Select(Wake));
-        menu.Items.Add(wake);
-        Add("Restart…", "restart", $"Restart {who}? Whoever is using it gets a minute's notice to save their work.");
-        Add("Shut down…", "shutdown", $"Shut {who} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
+        Item(power, "Wake up", async () => await Task.WhenAll(targets.Select(Wake)),
+            wakeable ? "Sends a Wake-on-LAN packet (it must be allowed in that PC's BIOS)" : "A PC's network address is learned once it answers with Sysoptimizer 1.9 or newer").IsEnabled = wakeable;
+        Command(power, "Restart…", "restart", $"Restart {who}? Whoever is using it gets a minute's notice to save their work.");
+        Command(power, "Shut down…", "shutdown", $"Shut {who} down? Whoever is using it gets a minute's notice — and you can't switch it back on from here.");
         menu.IsOpen = true;
     }
 
@@ -880,7 +879,9 @@ public sealed class PcCard : INotifyPropertyChanged
     private bool _online, _shown;
     private string _version = "";
     public string Version { get => _version; set { _version = value; Raise(nameof(Version)); } }
-    public string Status { get => _status; set { _status = value; Raise(nameof(Status)); } }
+    public string Status { get => _status; set { _status = value; Raise(nameof(Status)); Raise(nameof(Summary)); } }
+    /// <summary>The card's one line: CPU (and its temperature) and memory; the rest is in <see cref="Status"/>, on hover.</summary>
+    public string Summary => string.Join(" · ", _status.Split('\n').Take(2));
     public bool Online { get => _online; set { _online = value; Raise(nameof(Online)); } }
     public bool Shown { get => _shown; set { _shown = value; Raise(nameof(Shown)); } }
 
