@@ -402,6 +402,39 @@ try
     Check(sessions.Count == 2 && sessions[0]["date"]!.ToString() == $"{played:yyyy-MM-dd}" && (int)sessions[0]["minutes"]! == 2
           && (double)sessions[0]["avgFps"]! == 90 && (double)sessions[0]["maxFps"]! == 120, "ecosystem: minutes seen, average and best FPS (blank and under 1 ignored, name case ignored)");
     Check(sessions.Count == 2 && (int)sessions[1]["minutes"]! == 1 && (double)sessions[1]["avgFps"]! == 30, "ecosystem: today counts, its unfinished last line doesn't");
+
+    // A failed update check is a failure, never "nothing newer": offline, 403 (GitHub's rate limit), 5xx and an
+    // unreadable answer all throw; a readable answer with nothing newer returns null.
+    bool CheckFails(string feed)
+    {
+        Updater.Feed = feed;
+        try { Updater.Check(manual: true).GetAwaiter().GetResult(); return false; }
+        catch (Exception e) when (Updater.Failed(e)) { return true; }
+    }
+    static string Serve(int status, string body)
+    {
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start(); int port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
+        var listener = new System.Net.HttpListener();
+        listener.Prefixes.Add($"http://localhost:{port}/");
+        listener.Start();
+        _ = Task.Run(() =>
+        {
+            var c = listener.GetContext();
+            c.Response.StatusCode = status;
+            var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+            c.Response.ContentLength64 = bytes.Length;
+            c.Response.OutputStream.Write(bytes);
+            c.Response.Close(); // the listener is left to the process: stopping it here can cut the answer off
+        });
+        return $"http://localhost:{port}/";
+    }
+    Check(CheckFails("http://127.0.0.1:9/"), "update check: offline is a failure");
+    Check(CheckFails(Serve(403, "{\"message\":\"API rate limit exceeded\"}")), "update check: 403 (rate limit) is a failure");
+    Check(CheckFails(Serve(502, "")), "update check: 5xx is a failure");
+    Check(CheckFails(Serve(200, "<html>")), "update check: an unreadable answer is a failure");
+    Updater.Feed = Serve(200, "{\"tag_name\":\"v0.0.1\",\"body\":\"\",\"assets\":[{\"name\":\"Sysoptimizer-0.0.1-setup.exe\",\"browser_download_url\":\"x\",\"size\":1},{\"name\":\"Sysoptimizer.exe\",\"browser_download_url\":\"x\",\"size\":1}]}");
+    Check(Updater.Check(manual: true).GetAwaiter().GetResult() == null, "update check: nothing newer is not a failure");
 }
 catch (Exception ex)
 {

@@ -36,7 +36,7 @@ public partial class MainWindow : Window
 
     private ResourceMonitor? _resourceMonitor;
     private DispatcherTimer? _resourceTimer;
-    private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromMinutes(10) };
+    private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromMinutes(60) }; // first check 3 s after start, then hourly
     private UpdateDialog? _updateDialog;
     private string? _updateNotified;
     private readonly Queue<(DateTime Time, double Value)> _cpuHistory = new();
@@ -243,7 +243,12 @@ public partial class MainWindow : Window
     private async Task<string?> CheckForUpdate(bool manual)
     {
         if (_updateDialog != null) { _updateDialog.Activate(); return null; }
-        var release = await Updater.Check(manual);
+        Updater.Release? release;
+        try { release = await Updater.Check(manual); }
+        catch (Exception ex) when (Updater.Failed(ex))
+        {
+            return manual ? Updater.CheckFailed : null; // the automatic check stays quiet and tries again next hour
+        }
         if (release == null) return manual ? $"Sysoptimizer {Updater.Current} is the latest version." : null;
         if (!IsVisible)
         {

@@ -355,8 +355,10 @@ public partial class MainWindow
     /// <summary>The newest release from GitHub, checked like the updater checks it; the app restarts into it.</summary>
     private bool UpdateSelf(out string output)
     {
-        var latest = Updater.Latest().GetAwaiter().GetResult();
-        if (latest == null) { output = "couldn't reach GitHub for the latest version"; return false; }
+        Updater.Release? latest;
+        try { latest = Updater.Latest().GetAwaiter().GetResult(); }
+        catch (Exception ex) when (Updater.Failed(ex)) { output = "couldn't reach GitHub for the latest version"; return false; }
+        if (latest == null) { output = "the latest release has nothing for this copy to install"; return false; }
         if (latest.Version <= Updater.Current) { output = $"already up to date ({Updater.Current})"; return true; }
         string installer;
         try { installer = Updater.Download(latest, null, CancellationToken.None).GetAwaiter().GetResult(); }

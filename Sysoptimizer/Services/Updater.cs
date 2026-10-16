@@ -6,8 +6,11 @@ using System.Text.Json;
 namespace Sysoptimizer.Services;
 
 // Self-update, the way File Labs and Shelf do it (vault: File Labs/Release si update.md):
-//   • check 3 s after launch and every 10 minutes — the app stays open for a while, and a release
+//   • check 3 s after launch and every 60 minutes — the app stays open for a while, and a release
 //     published in the morning would otherwise be invisible until a restart;
+//   • a check that fails (offline, timeout, GitHub rate limit or 5xx, an unreadable answer) throws,
+//     so it is never mistaken for "nothing newer": the manual check says it couldn't check, the
+//     automatic one stays quiet and tries again next hour;
 //   • "Later" silences that one version for this session only, and a manual check ignores it, because
 //     asking explicitly deserves an answer;
 //   • updating downloads the release's installer, checks its size and SHA-256 against what GitHub
@@ -32,7 +35,17 @@ public static class Updater
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-    /// <summary>The latest release when it is newer than what's running, else null.</summary>
+    // the self-test points this at an unreachable host or a local server that answers 403
+    internal static string Feed = $"https://api.github.com/repos/{Repo}/releases/latest";
+
+    public const string CheckFailed = "Couldn't check for updates — no connection or GitHub is busy. Try again later.";
+
+    /// <summary>True for the exceptions a failed check throws (as opposed to a bug).</summary>
+    public static bool Failed(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException;
+
+    /// <summary>The latest release when it is newer than what's running, else null. Throws when the check
+    /// itself failed (see Failed).</summary>
     public static async Task<Release?> Check(bool manual)
     {
         var release = await Latest();
@@ -42,34 +55,28 @@ public static class Updater
         return release;
     }
 
-    /// <summary>The latest release as published, whatever its version.</summary>
+    /// <summary>The latest release as published, whatever its version; null when it has nothing for this copy
+    /// to install. Throws when GitHub couldn't be asked or its answer couldn't be read.</summary>
     public static async Task<Release?> Latest()
     {
-        try
-        {
-            var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Repo}/releases/latest");
-            request.Headers.UserAgent.ParseAdd("Sysoptimizer");
-            using var response = await Http.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return null;
-            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var root = json.RootElement;
-            var tag = root.GetProperty("tag_name").GetString() ?? "";
-            if (!Version.TryParse(tag.TrimStart('v', 'V'), out var version)) return null;
-            var asset = root.GetProperty("assets").EnumerateArray()
-                .FirstOrDefault(a => Portable
-                    ? (a.GetProperty("name").GetString() ?? "").Equals("Sysoptimizer.exe", StringComparison.OrdinalIgnoreCase)
-                    : (a.GetProperty("name").GetString() ?? "").EndsWith("setup.exe", StringComparison.OrdinalIgnoreCase));
-            if (asset.ValueKind != JsonValueKind.Object) return null;
-            // GitHub publishes each asset's SHA-256 as "sha256:<hex>"; older assets have none.
-            var digest = asset.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
-            return new Release(version, tag, root.GetProperty("body").GetString() ?? "",
-                asset.GetProperty("browser_download_url").GetString()!, asset.GetProperty("size").GetInt64(),
-                digest?.StartsWith("sha256:") == true ? digest[7..] : null);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException)
-        {
-            return null; // offline, rate-limited, or a release without an installer: nothing to say
-        }
+        var request = new HttpRequestMessage(HttpMethod.Get, Feed);
+        request.Headers.UserAgent.ParseAdd("Sysoptimizer");
+        using var response = await Http.SendAsync(request);
+        response.EnsureSuccessStatusCode(); // 403 (rate limit) and 5xx are failures, not "nothing new"
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = json.RootElement;
+        var tag = root.GetProperty("tag_name").GetString() ?? "";
+        if (!Version.TryParse(tag.TrimStart('v', 'V'), out var version)) throw new JsonException($"tag {tag} is not a version");
+        var asset = root.GetProperty("assets").EnumerateArray()
+            .FirstOrDefault(a => Portable
+                ? (a.GetProperty("name").GetString() ?? "").Equals("Sysoptimizer.exe", StringComparison.OrdinalIgnoreCase)
+                : (a.GetProperty("name").GetString() ?? "").EndsWith("setup.exe", StringComparison.OrdinalIgnoreCase));
+        if (asset.ValueKind != JsonValueKind.Object) return null; // a release without our asset: nothing to install
+        // GitHub publishes each asset's SHA-256 as "sha256:<hex>"; older assets have none.
+        var digest = asset.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
+        return new Release(version, tag, root.GetProperty("body").GetString() ?? "",
+            asset.GetProperty("browser_download_url").GetString()!, asset.GetProperty("size").GetInt64(),
+            digest?.StartsWith("sha256:") == true ? digest[7..] : null);
     }
 
     public static void Dismiss(Release release) => _dismissed = release.Tag;
