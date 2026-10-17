@@ -361,8 +361,9 @@ public partial class MainWindow
     {
         if (_tray != null) return;
         using var stream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/app.ico")).Stream;
-        var menu = new System.Windows.Forms.ContextMenuStrip();
+        var menu = TrayMenu.Create();
         menu.Items.Add("Open Sysoptimizer", null, (_, _) => ShowFromTray());
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Exit (stops recording)", null, (_, _) => ExitApp());
         _tray = new System.Windows.Forms.NotifyIcon
         {
