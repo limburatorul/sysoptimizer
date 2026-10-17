@@ -9,9 +9,13 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Sysoptimizer</AssemblyName>
-    <Version>1.15.2</Version>
+    <Version>1.15.3</Version>
     <Product>Sysoptimizer</Product>
+    <AssemblyTitle>Sysoptimizer</AssemblyTitle>
+    <Description>A Windows 10/11 tune-up tool that shows what it is about to change, and can change it back</Description>
     <Company>Protagonist Labs</Company>
+    <Authors>Protagonist Labs</Authors>
+    <Copyright>Copyright (c) 2026 Protagonist Labs. MIT licence</Copyright>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 

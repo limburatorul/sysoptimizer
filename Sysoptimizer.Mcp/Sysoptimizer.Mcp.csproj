@@ -11,6 +11,12 @@
     <RootNamespace>Sysoptimizer.Mcp</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <Version>1.0.0</Version>
+    <Product>Sysoptimizer</Product>
+    <AssemblyTitle>Sysoptimizer MCP connector</AssemblyTitle>
+    <Description>Lets Claude read the resource history Sysoptimizer records</Description>
+    <Company>Protagonist Labs</Company>
+    <Authors>Protagonist Labs</Authors>
+    <Copyright>Copyright (c) 2026 Protagonist Labs. MIT licence</Copyright>
   </PropertyGroup>
 
   <ItemGroup>

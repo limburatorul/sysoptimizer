@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity version="1.0.0.0" name="Sysoptimizer.app" />
+  <assemblyIdentity version="1.15.3.0" name="ProtagonistLabs.Sysoptimizer" type="win32" />
+  <description>Sysoptimizer</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
+        <!-- Admin on purpose: sensors (PawnIO), services, other users' processes, the firewall rule
+             and the logon task all need it. sysoptimizer-mcp.exe stays asInvoker. -->
         <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
       </requestedPrivileges>
     </security>

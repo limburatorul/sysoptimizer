@@ -16,6 +16,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
+AppCopyright=Copyright (c) 2026 Protagonist Labs
 VersionInfoVersion={#AppVersion}
 
 ; The app itself requires admin at every launch (it stops services and writes HKLM), so installing
