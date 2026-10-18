@@ -47,6 +47,8 @@ public class ResourceMonitor : IDisposable
         catch (Exception) { return null; } // ponytail: no drive health then; the Disks tab says nothing is known
     });
 
+    private readonly PeripheralBatteryService _peripherals = new();
+
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out int pid);
 
@@ -228,6 +230,7 @@ public class ResourceMonitor : IDisposable
         if ((now - _drivesReadAt).TotalSeconds >= 30) (_drives, _drivesReadAt) = (ReadDrives(), now);
         snap.Drives = _drives;
         if (_diskHealth.IsCompletedSuccessfully && _diskHealth.Result is { } health) snap.DriveHealth = health.Latest();
+        snap.Peripherals = _peripherals.Latest();
 
         // Frames per second: every app's, and the one in front's — a game being played.
         snap.FpsByPid = _fps.Read();

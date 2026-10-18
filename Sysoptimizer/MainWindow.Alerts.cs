@@ -117,10 +117,11 @@ public partial class MainWindow
         (AlertAppMemCheck, AlertAppMemBox, "AppMemGB", 16, 1, 512),
         (AlertDiskCheck, AlertDiskBox, "DiskFree", 10, 1, 50),
         (AlertBatteryCheck, AlertBatteryBox, "Battery", 15, 5, 90),
+        (AlertDeviceBatteryCheck, AlertDeviceBatteryBox, "DeviceBattery", 20, 5, 90),
     };
 
-    private int _alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes, _alertAppMem, _alertDisk, _alertBattery;
-    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn, _alertCoolingOn, _alertDriveOn;
+    private int _alertCpuTemp, _alertGpuTemp, _alertMem, _alertAppCpu, _alertAppMinutes, _alertAppMem, _alertDisk, _alertBattery, _alertDeviceBattery;
+    private bool _alertCpuTempOn, _alertGpuTempOn, _alertMemOn, _alertAppCpuOn, _alertUnsignedOn, _alertAppMemOn, _alertDiskOn, _alertBatteryOn, _alertDeviceBatteryOn, _alertCoolingOn, _alertDriveOn;
     private bool _alertSettingsLoading;
 
     private void LoadAlertSettings()
@@ -176,6 +177,7 @@ public partial class MainWindow
              AlertAppCpuCheck.IsChecked == true, AlertUnsignedCheck.IsChecked == true);
         (_alertAppMem, _alertDisk, _alertBattery) = (values["AppMemGB"], values["DiskFree"], values["Battery"]);
         (_alertAppMemOn, _alertDiskOn, _alertBatteryOn) = (AlertAppMemCheck.IsChecked == true, AlertDiskCheck.IsChecked == true, AlertBatteryCheck.IsChecked == true);
+        (_alertDeviceBattery, _alertDeviceBatteryOn) = (values["DeviceBattery"], AlertDeviceBatteryCheck.IsChecked == true);
     }
 
     private int CurrentAlertValue(string name, int fallback)
@@ -184,7 +186,7 @@ public partial class MainWindow
         {
             "CpuTemp" => _alertCpuTemp, "GpuTemp" => _alertGpuTemp, "Memory" => _alertMem,
             "AppCpu" => _alertAppCpu, "AppMinutes" => _alertAppMinutes, "AppMemGB" => _alertAppMem,
-            "DiskFree" => _alertDisk, _ => _alertBattery,
+            "DiskFree" => _alertDisk, "DeviceBattery" => _alertDeviceBattery, _ => _alertBattery,
         };
         return v > 0 ? v : fallback;
     }
@@ -206,6 +208,7 @@ public partial class MainWindow
     private void CheckAlerts(ResourceSnapshot snap, List<ProcessUsage>? processes)
     {
         CheckLimits(_localAlerts, snap, pc: null);
+        ShowTrayBatteries(snap.Peripherals);
 
         if (processes == null) return;
         Sustained(_appBusySince, _alertAppCpuOn ? processes.Where(p => p.Cpu >= _alertAppCpu) : [], TimeSpan.FromMinutes(_alertAppMinutes),
@@ -240,6 +243,9 @@ public partial class MainWindow
             () => $"{who}Memory at {snap.MemPercent:0}% for over a minute (limit {_alertMem}%)");
         if (_alertBatteryOn && snap.Battery is { PluggedIn: false } battery && battery.Percent <= _alertBattery)
             Alert(key + "battery", $"{who}Battery at {battery.Percent:0}% and not plugged in (limit {_alertBattery}%)");
+        if (_alertDeviceBatteryOn)
+            foreach (var device in snap.Peripherals.Where(p => p.IsLow(_alertDeviceBattery)))
+                Alert(key + "device-battery:" + device.Name, $"{who}{device.Name}: battery at {device.Shown.ToLowerInvariant()} (limit {_alertDeviceBattery}%)");
         if (_alertDriveOn)
             foreach (var drive in snap.DriveHealth.Where(d => DriveStatus(d).Level != "ok"))
                 Alert(key + "drive:" + drive.Name, $"{who}{drive.Name}: {DriveStatus(drive).Text.ToLowerInvariant()} — {DriveDetails(drive)}");

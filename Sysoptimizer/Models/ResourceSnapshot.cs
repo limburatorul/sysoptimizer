@@ -55,6 +55,25 @@ public class BatteryReading
     public double MinutesLeft { get; set; } = double.NaN; // on battery only
 }
 
+/// <summary>A wireless mouse, keyboard, headset or controller that says how full its battery is.</summary>
+public class PeripheralBattery
+{
+    public string Name { get; set; } = "";
+    public string Via { get; set; } = "";                 // how it was read: Bluetooth, XInput, Logitech HID++, PlayStation
+    public double Percent { get; set; } = double.NaN;     // NaN when the device gives only a level, or nothing
+    public string? Level { get; set; }                    // Full / Good / Medium / Low / Empty / Wired, when that's all it says
+    public bool Charging { get; set; }
+    public DateTime ReadAt { get; set; } = DateTime.Now;
+    public bool Asleep { get; set; }                      // didn't answer this time: its last reading, kept
+
+    public string Details => Asleep ? $"{Via} · asleep, read at {ReadAt:HH:mm}" : Via;
+
+    public bool IsLow(int limit) => !Charging && (Percent <= limit || Level is "Low" or "Empty");
+
+    public string Shown => Charging ? (double.IsNaN(Percent) ? "Charging" : $"Charging · {Percent:0}%")
+        : !double.IsNaN(Percent) ? $"{Percent:0}%" : Level ?? "Unknown";
+}
+
 public class ResourceSnapshot
 {
     public double CpuPercent { get; set; }
@@ -81,4 +100,5 @@ public class ResourceSnapshot
     public List<NetSnapshot> Nets { get; set; } = new();
     public List<DriveSpace> Drives { get; set; } = new(); // fixed drives' free space, read every 30 s
     public List<DriveHealth> DriveHealth { get; set; } = new(); // read every minute
+    public List<PeripheralBattery> Peripherals { get; set; } = new(); // read every 5 minutes
 }

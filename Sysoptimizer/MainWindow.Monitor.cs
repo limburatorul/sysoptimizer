@@ -381,6 +381,15 @@ public partial class MainWindow
         };
     }
 
+    /// <summary>The tray icon's tooltip names each wireless device and its battery (Windows cuts a tooltip at 127 characters).</summary>
+    private void ShowTrayBatteries(List<PeripheralBattery> devices)
+    {
+        if (_tray == null) return;
+        string text = string.Join("\n", devices.Select(d => $"{d.Name}: {d.Shown}").Prepend("Sysoptimizer — recording"));
+        if (text.Length > 127) text = text[..127];
+        if (_tray.Text != text) _tray.Text = text;
+    }
+
     public void ShowFromTray()
     {
         bool wasHidden = !IsVisible;

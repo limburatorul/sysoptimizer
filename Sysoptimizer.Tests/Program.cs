@@ -429,6 +429,34 @@ try
         });
         return $"http://localhost:{port}/";
     }
+    // Wireless batteries: the byte layouts, and the HID++ allow-list that keeps every request a read.
+    Check(PeripheralReports.HidppAllowed(PeripheralReports.Root, 0) && PeripheralReports.HidppAllowed(PeripheralReports.UnifiedBattery, 1)
+          && !PeripheralReports.HidppAllowed(PeripheralReports.UnifiedBattery, 2) && !PeripheralReports.HidppAllowed(0x8070, 1) // a setter, lighting
+          && !PeripheralReports.HidppAllowed(PeripheralReports.Root, 1) && !PeripheralReports.HidppAllowed(0x00D0, 0), "HID++: only the listed reads are allowed (no setters, lighting or firmware)");
+    var unified = PeripheralReports.Unified(new byte[] { 72, 4, 0, 0 });
+    Check(unified.Percent == 72 && unified.Level == "Good" && !unified.Charging, "HID++ 0x1004: 72%, good, discharging");
+    var levelsOnly = PeripheralReports.Unified(new byte[] { 0, 2, 1, 1 });
+    Check(double.IsNaN(levelsOnly.Percent) && levelsOnly.Level == "Low" && levelsOnly.Charging, "HID++ 0x1004: a device without a percentage gives its level; charging");
+    Check(PeripheralReports.Status(new byte[] { 55, 50, 0 }) == (55, false) && PeripheralReports.Status(new byte[] { 90, 0, 1 }).Charging, "HID++ 0x1000: level and recharging");
+    var volts = PeripheralReports.Voltage(new byte[] { 0x0F, 0x50, 0x00 }); // 3920 mV
+    Check(volts.Millivolts == 3920 && volts.Percent == 70 && !volts.Charging && PeripheralReports.Voltage(new byte[] { 0x10, 0x04, 0x80 }).Charging, "HID++ 0x1001: millivolts to percent, external power bit");
+    Check(PeripheralReports.VoltagePercent(3000) == 0 && PeripheralReports.VoltagePercent(4300) == 100 && PeripheralReports.VoltagePercent(3850) == 55, "Li-ion curve: clamps and interpolates");
+    var ds4 = new byte[64]; ds4[0] = 0x01; ds4[30] = 0x07;
+    Check(PeripheralReports.SonyBattery(PeripheralReports.Sony.DualShock4, ds4) == (true, 70, false, false), "DS4 USB: level 7 = 70%, no cable");
+    ds4[30] = 0x1B;
+    Check(PeripheralReports.SonyBattery(PeripheralReports.Sony.DualShock4, ds4) == (true, 100, false, false), "DS4 USB: cable and level 11 = full, not charging");
+    ds4[30] = 0x00;
+    Check(!PeripheralReports.SonyBattery(PeripheralReports.Sony.DualShock4, ds4).Known, "DS4 clone: a zero battery byte reads as unknown");
+    var ds4Bt = new byte[78]; ds4Bt[0] = 0x11; ds4Bt[32] = 0x05;
+    Check(PeripheralReports.SonyBattery(PeripheralReports.Sony.DualShock4, ds4Bt) == (true, 50, false, true), "DS4 Bluetooth full report: byte 32");
+    Check(PeripheralReports.SonyBattery(PeripheralReports.Sony.DualShock4, new byte[] { 0x01, 0x80, 0x80, 0x80, 0x80, 0x08, 0, 0, 0, 0 }) is { Known: false, Bluetooth: true }, "DS4 Bluetooth short report: no battery in it");
+    var dualSense = new byte[64]; dualSense[0] = 0x01; dualSense[53] = 0x14;
+    Check(PeripheralReports.SonyBattery(PeripheralReports.Sony.DualSenseEdge, dualSense) == (true, 40, true, false), "DualSense USB: level 4, charging");
+    var dualSenseBt = new byte[78]; dualSenseBt[0] = 0x31; dualSenseBt[54] = 0x2A;
+    Check(PeripheralReports.SonyBattery(PeripheralReports.Sony.DualSense, dualSenseBt) == (true, 100, true, true), "DualSense Bluetooth: byte 54, full");
+    Check(PeripheralReports.SonyModel(0x0DF2) == PeripheralReports.Sony.DualSenseEdge && PeripheralReports.SonyModel(0x0268) == PeripheralReports.Sony.None, "Sony: Edge known, a DualShock 3 ignored");
+    Check(PeripheralReports.XInputLevel(0, 3) == null && PeripheralReports.XInputLevel(1, 0) == "Wired" && PeripheralReports.XInputLevel(3, 1) == "Low", "XInput: disconnected, wired, NiMH low");
+
     Check(CheckFails("http://127.0.0.1:9/"), "update check: offline is a failure");
     Check(CheckFails(Serve(403, "{\"message\":\"API rate limit exceeded\"}")), "update check: 403 (rate limit) is a failure");
     Check(CheckFails(Serve(502, "")), "update check: 5xx is a failure");

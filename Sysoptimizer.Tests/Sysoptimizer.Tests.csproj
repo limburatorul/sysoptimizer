@@ -22,6 +22,7 @@
     <Compile Include="..\Sysoptimizer\Services\Ecosystem.cs" Link="Ecosystem.cs" />
     <Compile Include="..\Sysoptimizer\Services\Updater.cs" Link="Updater.cs" />
     <Compile Include="..\Sysoptimizer\Services\CleanupService.cs" Link="CleanupService.cs" />
+    <Compile Include="..\Sysoptimizer\Services\PeripheralReports.cs" Link="PeripheralReports.cs" />
   </ItemGroup>
 
 </Project>

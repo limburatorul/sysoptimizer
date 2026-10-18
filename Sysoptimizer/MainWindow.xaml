@@ -43,6 +43,32 @@
                 <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource HistoryRowTemplate}" />
             </Button>
         </DataTemplate>
+        <!-- A name, a line of details and a status chip (Tag: ok / warn / bad / none) — drive health, wireless batteries -->
+        <DataTemplate x:Key="StatusRowTemplate">
+            <DockPanel Margin="0,5">
+                <Border x:Name="Chip" DockPanel.Dock="Right" Padding="9,2" CornerRadius="{DynamicResource PillRadius}" BorderThickness="1" VerticalAlignment="Center"
+                        BorderBrush="{DynamicResource StatusGood}">
+                    <TextBlock x:Name="ChipText" Text="{Binding Note}" FontSize="11" Foreground="{DynamicResource StatusGood}" />
+                </Border>
+                <StackPanel>
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                </StackPanel>
+            </DockPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Tag}" Value="warn">
+                    <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StatusWarn}" />
+                    <Setter TargetName="ChipText" Property="Foreground" Value="{DynamicResource StatusWarn}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Tag}" Value="bad">
+                    <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StatusBad}" />
+                    <Setter TargetName="ChipText" Property="Foreground" Value="{DynamicResource StatusBad}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Tag}" Value="none">
+                    <Setter TargetName="Chip" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid>
@@ -416,32 +442,13 @@
                             <Border x:Name="DriveHealthPanel" Visibility="Collapsed" Margin="16,16,16,0" Padding="14,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource CaseLabel}" Tag="Drive health" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4" />
-                                    <ItemsControl x:Name="DriveHealthList">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <DockPanel Margin="0,5">
-                                                    <Border x:Name="Chip" DockPanel.Dock="Right" Padding="9,2" CornerRadius="{DynamicResource PillRadius}" BorderThickness="1" VerticalAlignment="Center"
-                                                            BorderBrush="{DynamicResource StatusGood}">
-                                                        <TextBlock x:Name="ChipText" Text="{Binding Note}" FontSize="11" Foreground="{DynamicResource StatusGood}" />
-                                                    </Border>
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                </DockPanel>
-                                                <DataTemplate.Triggers>
-                                                    <DataTrigger Binding="{Binding Tag}" Value="warn">
-                                                        <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StatusWarn}" />
-                                                        <Setter TargetName="ChipText" Property="Foreground" Value="{DynamicResource StatusWarn}" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Tag}" Value="bad">
-                                                        <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StatusBad}" />
-                                                        <Setter TargetName="ChipText" Property="Foreground" Value="{DynamicResource StatusBad}" />
-                                                    </DataTrigger>
-                                                </DataTemplate.Triggers>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <ItemsControl x:Name="DriveHealthList" ItemTemplate="{StaticResource StatusRowTemplate}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Margin="16,16,16,0" Padding="14,10" CornerRadius="{DynamicResource CardRadius}" Background="{DynamicResource CardBackground}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource CaseLabel}" Tag="Wireless devices" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                    <ItemsControl x:Name="PeripheralsList" ItemTemplate="{StaticResource StatusRowTemplate}" />
                                 </StackPanel>
                             </Border>
                             <TextBlock Style="{StaticResource CaseLabel}" Tag="Disks" Foreground="{DynamicResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="16,18,16,0" />
@@ -951,6 +958,12 @@
                                             <CheckBox x:Name="AlertBatteryCheck" VerticalAlignment="Center" Click="AlertSetting_Changed" Content="Battery under" />
                                             <TextBox x:Name="AlertBatteryBox" TextChanged="AlertSetting_Changed" AutomationProperties.Name="Battery limit, percent" />
                                             <TextBlock Text="% unplugged" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,24,4"
+                                                    ToolTip="A wireless mouse, keyboard, headset or controller (read every 5 minutes). Devices that give only a level warn at Low.">
+                                            <CheckBox x:Name="AlertDeviceBatteryCheck" VerticalAlignment="Center" Click="AlertSetting_Changed" Content="A wireless device under" />
+                                            <TextBox x:Name="AlertDeviceBatteryBox" TextChanged="AlertSetting_Changed" AutomationProperties.Name="Wireless device battery limit, percent" />
+                                            <TextBlock Text="%" />
                                         </StackPanel>
                                         <CheckBox x:Name="AlertUnsignedCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="An unsigned app starts" />
                                         <CheckBox x:Name="AlertDriveCheck" Margin="0,6,24,4" Click="AlertSetting_Changed" Content="A drive is failing or wearing out"

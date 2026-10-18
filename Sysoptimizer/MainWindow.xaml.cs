@@ -416,6 +416,25 @@ public partial class MainWindow : Window
         DriveHealthPanel.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    private string _peripheralsShown = "\0";
+
+    /// <summary>Wireless devices' batteries on the Hardware tab, amber at or under the alert limit.</summary>
+    private void ShowPeripherals(List<PeripheralBattery> devices)
+    {
+        var rows = devices.Select(d => new OptionItem { Name = d.Name, Description = d.Details, Note = d.Shown, Tag = d.IsLow(_alertDeviceBattery) ? "warn" : "ok" }).ToList();
+        if (rows.Count == 0)
+            rows.Add(new OptionItem
+            {
+                Name = "None found yet",
+                Description = "Bluetooth devices, Xbox and PlayStation controllers and Logitech receivers are checked every 5 minutes.",
+                Tag = "none",
+            });
+        string shown = string.Join("|", rows.Select(r => r.Name + r.Description + r.Note + r.Tag));
+        if (shown == _peripheralsShown) return;
+        _peripheralsShown = shown;
+        PeripheralsList.ItemsSource = rows;
+    }
+
     private static string DriveDetails(DriveHealth d) => string.Join(" · ", new[]
     {
         double.IsNaN(d.TempC) ? null : $"{d.TempC:0}°C" + (double.IsNaN(d.WarnTempC) ? "" : $" (warns at {d.WarnTempC:0}°C)"),
@@ -435,6 +454,7 @@ public partial class MainWindow : Window
     private void ShowSnapshot(ResourceSnapshot snap)
     {
         ShowDriveHealth(snap.DriveHealth);
+        ShowPeripherals(snap.Peripherals);
         CpuPercentText.Text = $"{snap.CpuPercent:0}%";
         CpuDetailText.Text = string.Join(" · ", new[]
         {
