@@ -1660,7 +1660,7 @@ public partial class MainWindow
     private void HistoryActions_Click(object sender, RoutedEventArgs e)
     {
         var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
-        var keep = new MenuItem { Header = "Keep the history for", IsEnabled = _source == null, ToolTip = "About 1.5 MB per day, packed; days past the limit are removed at midnight. This PC's own setting." };
+        var keep = new MenuItem { Header = "Keep the history for", IsEnabled = _source == null, ToolTip = "About 2.2 MB per day, packed; days past the limit are removed at midnight. This PC's own setting." };
         foreach (var option in RetentionCombo.Items.OfType<ComboBoxItem>())
         {
             var item = new MenuItem { Header = ((string)option.Content).Replace("Keep ", ""), IsChecked = option.IsSelected };

@@ -41,6 +41,7 @@ public partial class MainWindow
         };
         PrivacyList.IsVisibleChanged += (_, e) => { if ((bool)e.NewValue) RefreshPrivacy(); }; // a pill under Processes
         InitHistory();
+        InitAppHistory();
         InitEvents();
         InitRemote();
         InitAutomation();
@@ -159,7 +160,7 @@ public partial class MainWindow
             (float)snap.CpuWatts, (float)snap.GpuWatts, snap.Fans.Count > 0 ? (float)snap.Fans.Max(f => f.Rpm) : float.NaN,
             snap.Battery is { } battery ? (float)battery.Percent : float.NaN, (float)snap.Fps);
         var top = historyTick && processes != null
-            ? ProcessMonitor.ForHistory(processes).Select(p => new ProcSample(now, p.Name, (float)p.Cpu, (float)p.RamMB, (float)p.Gpu, p.Fps >= 1 ? (float)p.Fps : float.NaN)).ToList()
+            ? ProcessMonitor.ForHistory(processes).Select(p => new ProcSample(now, p.Name, (float)p.Cpu, (float)p.RamMB, (float)p.Gpu, p.Fps >= 1 ? (float)p.Fps : float.NaN, p.Instances)).ToList()
             : null;
         try
         {

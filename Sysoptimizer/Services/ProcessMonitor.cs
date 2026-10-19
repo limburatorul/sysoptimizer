@@ -99,11 +99,18 @@ public sealed class ProcessMonitor
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
-    /// <summary>What goes into the history every 10 seconds: the heaviest few by each measure, not all ~300.</summary>
+    /// <summary>
+    /// What goes into the history every 10 seconds: every app over a small threshold, plus the 15 heaviest by
+    /// each measure — enough for each app's own history (measured: ~53 of ~180 apps here), not all of them.
+    /// Before 1.17 it was only the 8 busiest by CPU and 5 by memory and GPU.
+    /// </summary>
+    public const double HistoryMinCpu = 0.5, HistoryMinGpu = 0.5, HistoryMinRamMB = 100;
+
     public static List<ProcessUsage> ForHistory(List<ProcessUsage> all) =>
-        all.OrderByDescending(p => p.Cpu).Take(8).Where(p => p.Cpu >= 0.5)
-           .Concat(all.OrderByDescending(p => p.RamMB).Take(5))
-           .Concat(all.OrderByDescending(p => p.Gpu).Take(5).Where(p => p.Gpu >= 0.5))
+        all.Where(p => p.Cpu >= HistoryMinCpu || p.Gpu >= HistoryMinGpu || p.RamMB >= HistoryMinRamMB)
+           .Concat(all.OrderByDescending(p => p.Cpu).Take(15).Where(p => p.Cpu > 0))
+           .Concat(all.OrderByDescending(p => p.RamMB).Take(15))
+           .Concat(all.OrderByDescending(p => p.Gpu).Take(15).Where(p => p.Gpu > 0))
            .Concat(all.OrderByDescending(p => p.Fps).Take(3).Where(p => p.Fps >= 1))
            .DistinctBy(p => p.Name).ToList();
 }

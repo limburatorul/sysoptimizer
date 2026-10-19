@@ -174,6 +174,54 @@ try
     var a = totals.Single(t => t.Name == "a");
     Check(totals[0].Name == "a" && a.AvgCpu == 5 && a.PeakCpu == 10, "totals: average over every snapshot, peak kept");
 
+    // 5b. The app index (1.17): a day recorded before it gets one at maintenance without its raw file being
+    //     touched; an app missing from snapshots is "not recorded", not 0; sessions; the export's rows.
+    {
+        var d = DateTime.Today.AddDays(-2);
+        long b = Unix(d.AddHours(10)); // on the 5-minute grid
+        var dayLines = new List<string>();
+        for (long t = b; t < b + 65 * 60; t += 10)
+        {
+            long min = (t - b) / 60;
+            if (min >= 40 && min < 60) continue; // the PC was off
+            dayLines.Add($"S,{t},20,50,2,60,40");
+            dayLines.Add($"P,{t},other,1,200,0,");
+            // editor: 0-15 min, a 5-minute slot away, 20-25, two slots away, 35-40, then again after the PC was off
+            if (min < 15 || (min >= 20 && min < 25) || (min >= 35 && min < 40) || min >= 60)
+                dayLines.Add($"P,{t},editor,{(min == 3 && t % 60 == b % 60 ? 40 : 4)},800,0,,3");
+        }
+        string rawPath = Path.Combine(folder, $"{d:yyyy-MM-dd}.csv.br");
+        using (var w = new StreamWriter(new BrotliStream(File.Create(rawPath), CompressionLevel.Fastest))) foreach (var l in dayLines) w.WriteLine(l);
+        byte[] before = File.ReadAllBytes(rawPath);
+        HistoryStore.Maintain(DateTime.Today);
+        Check(File.Exists(Path.Combine(folder, $"{d:yyyy-MM-dd}.apps.csv.br")) && File.ReadAllBytes(rawPath).AsSpan().SequenceEqual(before),
+            "app index: built for a day packed before 1.17, its raw file byte for byte the same");
+
+        var h = HistoryStore.ReadApps(d.AddHours(9), d.AddHours(13));
+        var ed = HistoryStore.AppTotals(h).Single(t => t.Name == "editor");
+        Check(h.SlotSeconds == 300 && h.Slots.Count == 9, $"app index: 5-minute slots, none where nothing was recorded ({h.Slots.Count})");
+        Check(ed.Slots == 6 && ed.PeakCpu == 40 && Math.Abs(ed.Cpu - (40 + 4 * 179.0) / 180) < 0.01 && ed.Processes == 3 && ed.RamMB == 800,
+            $"app index: averages over the snapshots it was in, not the range; peak and process count kept ({ed.Cpu:0.###})");
+        var gap = h.Slots.Single(s => s.Time == DateTimeOffset.FromUnixTimeSeconds(b + 15 * 60).UtcDateTime);
+        Check(gap.Snapshots == 30 && !h.Apps.Any(x => x.Name == "editor" && x.Time == gap.Time), "app index: a slot with snapshots but without the app has no row for it — not a 0");
+        var appSessions = HistoryStore.AppSessions(h, "editor");
+        Check(appSessions.Count == 3 && appSessions[0].Start == DateTimeOffset.FromUnixTimeSeconds(b).UtcDateTime && appSessions[0].End == DateTimeOffset.FromUnixTimeSeconds(b + 25 * 60).UtcDateTime
+              && appSessions[1].End - appSessions[1].Start == TimeSpan.FromMinutes(5),
+            "sessions: one missing slot doesn't split a session, two do, and so does the PC being off: " + string.Join("; ", appSessions.Select(x => $"{x.Start.ToLocalTime():HH:mm}-{x.End.ToLocalTime():HH:mm}")));
+        var shortRange = HistoryStore.ReadApps(d.AddHours(10), d.AddHours(11));
+        Check(shortRange.SlotSeconds == 30 && HistoryStore.AppTotals(shortRange).Single(t => t.Name == "editor").PeakCpu == 40, "app index: an hour comes from the snapshots, in 30-second slots");
+
+        var csv = HistoryStore.AppCsv(h, "editor").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Check(csv.Length == 1 + 13 && csv[1].Contains(",recorded,") && csv[1].Contains(",3,20,50,2")
+              && csv.Count(r => r.Contains(",not recorded,")) == 3 && csv.Count(r => r.Contains(",nothing recorded,")) == 4 && !csv.Any(r => r.Contains("other")),
+            "export: a row per slot — recorded, not recorded, nothing recorded — and no other app: " + string.Join(" | ", csv.Select(r => r.Split(',')[1])));
+
+        HistoryStore.RetentionDays = 1;
+        HistoryStore.Maintain(DateTime.Today);
+        Check(!File.Exists(Path.Combine(folder, $"{d:yyyy-MM-dd}.apps.csv.br")), "app index: removed with its day past retention");
+        HistoryStore.RetentionDays = 30;
+    }
+
     // 6. Remote monitoring: the protocol's guarantees, then a real server and client on localhost.
     var key = RemoteCrypto.ParseKey(RemoteCrypto.NewKey())!;
     var otherKey = RemoteCrypto.ParseKey(RemoteCrypto.NewKey())!;

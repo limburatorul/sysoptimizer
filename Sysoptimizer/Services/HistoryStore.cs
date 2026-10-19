@@ -13,11 +13,20 @@ namespace Sysoptimizer.Services;
 public readonly record struct SysSample(DateTime Time, float Cpu, float Mem, float Gpu, float CpuTemp, float GpuTemp,
     float DiskMBs = float.NaN, float NetMbps = float.NaN, float CpuWatts = float.NaN, float GpuWatts = float.NaN, float FanRpm = float.NaN, float BatteryPct = float.NaN,
     float Fps = float.NaN);
-public readonly record struct ProcSample(DateTime Time, string Name, float Cpu, float RamMB, float Gpu, float Fps = float.NaN);
+/// <param name="Instances">How many processes of the exe ran (chrome × 30 → 30); 0 in files from before 1.17.</param>
+public readonly record struct ProcSample(DateTime Time, string Name, float Cpu, float RamMB, float Gpu, float Fps = float.NaN, int Instances = 0);
 /// <param name="Kind">launch (Detail = app), sleep, wake, start (Detail = boot time, unix seconds).</param>
 public readonly record struct HistoryEvent(DateTime Time, string Kind, string Detail);
 public sealed record ProcessTotal(string Name, double AvgCpu, double PeakCpu, double AvgRamMB, double PeakRamMB, double AvgGpu, double PeakGpu, int Seen);
 public sealed record HistoryData(List<SysSample> System, List<ProcSample> Processes, List<HistoryEvent> Events);
+/// <summary>A stretch of the app index: how many app snapshots were taken in it, and the whole PC's averages over it.</summary>
+public readonly record struct AppSlot(DateTime Time, int Snapshots, float Cpu, float Mem, float Gpu);
+/// <summary>One app in one slot: in how many of its snapshots it was recorded, its averages over those and its peaks.</summary>
+public readonly record struct AppPoint(DateTime Time, string Name, int Seen, float Cpu, float PeakCpu, float RamMB, float PeakRamMB, float Gpu, float PeakGpu, int Instances);
+public sealed record AppHistory(int SlotSeconds, List<AppSlot> Slots, List<AppPoint> Apps);
+/// <param name="Slots">How many slots it was recorded in.</param>
+public sealed record AppTotal(string Name, double Cpu, float PeakCpu, double RamMB, float PeakRamMB, double Gpu, float PeakGpu, int Slots, int Processes);
+public sealed record AppSession(DateTime Start, DateTime End, double Cpu, float PeakCpu, double RamMB, float PeakRamMB, double Gpu, float PeakGpu, int Processes);
 
 /// <summary>
 /// The recorded history: one plain-text file per local day under ProgramData (writable by the elevated
@@ -25,7 +34,8 @@ public sealed record HistoryData(List<SysSample> System, List<ProcSample> Proces
 ///   S,unixSeconds,cpu,mem,gpu,cpuTemp,gpuTemp,diskMBs,netMbps,cpuW,gpuW,fanRpm,battery%,fps (the app in front)
 ///                                                 — every second (blank when unknown; older files end
 ///                                                   earlier: at gpuTemp before 1.5, at netMbps before 1.6)
-///   P,unixSeconds,name,cpu,ramMB,gpu,fps          — the top processes, every 10 seconds (fps from 1.10)
+///   P,unixSeconds,name,cpu,ramMB,gpu,fps,count    — the apps, every 10 seconds (fps from 1.10; the process
+///                                                   count, and every app over a small threshold, from 1.17)
 ///   E,unixSeconds,kind,detail                     — app launches, sleep/wake, app start (with boot time)
 /// Today's file is appended and flushed line by line, so a hard reset loses at most a torn last line,
 /// which the reader skips. A finished day gets a per-minute summary beside it in the same format (S = the
@@ -58,7 +68,7 @@ public static class HistoryStore
                 + $"{F(sample.CpuWatts)},{F(sample.GpuWatts)},{F(sample.FanRpm)},{F(sample.BatteryPct)},{F(sample.Fps)}");
             if (processes == null) return;
             foreach (var p in processes)
-                w.WriteLine($"P,{t},{Clean(p.Name)},{F(p.Cpu)},{F(p.RamMB)},{F(p.Gpu)},{F(p.Fps)}");
+                w.WriteLine($"P,{t},{Clean(p.Name)},{F(p.Cpu)},{F(p.RamMB)},{F(p.Gpu)},{F(p.Fps)},{p.Instances}");
         }
     }
 
@@ -91,6 +101,7 @@ public static class HistoryStore
 
     private static string RawPath(DateTime day) => Path.Combine(Folder, $"{day:yyyy-MM-dd}.csv");
     private static string MinutePath(DateTime day) => Path.Combine(Folder, $"{day:yyyy-MM-dd}.min.csv");
+    private static string AppIndexPath(DateTime day) => Path.Combine(Folder, $"{day:yyyy-MM-dd}.apps.csv");
 
     private static readonly object MaintainGate = new();
 
@@ -108,12 +119,14 @@ public static class HistoryStore
                     if (day < today.AddDays(-RetentionDays)) { File.Delete(file); continue; }
                     if (day >= today) continue;
                     if (name == $"{day:yyyy-MM-dd}.csv") EnsureMinuteSummary(day);
+                    // Days recorded before 1.17 get their app index here too, once: it's only added, nothing is rewritten.
+                    if (name == $"{day:yyyy-MM-dd}.csv" || name == $"{day:yyyy-MM-dd}.csv.br" || name == $"{day:yyyy-MM-dd}.csv.gz") EnsureAppIndex(day);
                     if (name.EndsWith(".csv")) Pack(file, File.OpenRead(file), file + ".br");
                     else if (name.EndsWith(".csv.gz")) Pack(file, new GZipStream(File.OpenRead(file), CompressionMode.Decompress), file[..^3] + ".br");
                 }
                 catch (IOException) { } // a reader has it open right now; try again on the next day change
             }
-            foreach (var file in Directory.GetFiles(Folder, "*.min.csv")) // summaries written since the loop listed the folder
+            foreach (var file in Directory.GetFiles(Folder, "*.csv").Where(f => f.EndsWith(".min.csv") || f.EndsWith(".apps.csv"))) // summaries written since the loop listed the folder
                 try { Pack(file, File.OpenRead(file), file + ".br"); }
                 catch (IOException) { }
         }
@@ -260,6 +273,187 @@ public static class HistoryStore
         return lines;
     }
 
+    // --- the app index: each app's use per 5 minutes, so an app's month loads in a blink ---
+
+    /// <summary>The app index's slot: 5 minutes — a 30-day chart has ~3 h per column, a day ~6 min.</summary>
+    public const int AppSlotSeconds = 300;
+
+    /// <summary>
+    /// Every app recorded in [from, to], slot by slot, with the PC's own averages per slot. Up to 3 hours it
+    /// comes from the snapshots themselves in 30-second slots; longer, from the per-day app index (today's
+    /// summarized on the fly). A slot without an app's row means it wasn't in that slot's snapshots — closed,
+    /// or under the recording threshold — not that it used nothing; a missing slot means nothing was recorded.
+    /// </summary>
+    public static AppHistory ReadApps(DateTime from, DateTime to)
+    {
+        int slot = (to - from).TotalHours <= 3 ? 30 : AppSlotSeconds;
+        var result = new AppHistory(slot, new(), new());
+        long fromT = Unix(from) / slot * slot, toT = Unix(to);
+        var today = DateTime.Now.Date;
+        for (var day = from.ToLocalTime().Date; day <= to.ToLocalTime().Date; day = day.AddDays(1))
+        {
+            using var reader = slot == AppSlotSeconds && day < today ? OpenAppIndex(day) : SummarizeApps(OpenRaw(day), slot);
+            if (reader != null) ParseApps(reader, fromT, toT, result);
+        }
+        result.Slots.Sort((a, b) => a.Time.CompareTo(b.Time));
+        result.Apps.Sort((a, b) => a.Time.CompareTo(b.Time));
+        return result;
+    }
+
+    private static TextReader? OpenAppIndex(DateTime day)
+    {
+        EnsureAppIndex(day);
+        string path = AppIndexPath(day);
+        if (File.Exists(path + ".br")) return new StreamReader(new BrotliStream(Shared(path + ".br"), CompressionMode.Decompress));
+        if (File.Exists(path)) return new StreamReader(Shared(path));
+        return SummarizeApps(OpenRaw(day), AppSlotSeconds); // couldn't write it (the non-elevated MCP server): summarized in memory
+    }
+
+    /// <summary>Builds a finished day's app index from its raw file, written under a temporary name first. Never touches the raw file.</summary>
+    private static void EnsureAppIndex(DateTime day)
+    {
+        string path = AppIndexPath(day);
+        if (File.Exists(path) || File.Exists(path + ".br")) return;
+        using var index = SummarizeApps(OpenRaw(day), AppSlotSeconds);
+        if (index == null) return;
+        try
+        {
+            File.WriteAllText(path + ".tmp", index.ReadToEnd());
+            File.Move(path + ".tmp", path, overwrite: true);
+        }
+        catch (UnauthorizedAccessException) { } // the non-elevated MCP server can't write here
+    }
+
+    /// <summary>
+    /// Raw lines → per slot: T,slot,snapshots,cpu,mem,gpu (the PC's averages over its S rows) and, per app recorded in it,
+    /// A,slot,name,seen,cpu,peakCpu,ramMB,peakRamMB,gpu,peakGpu,processes (averages over the snapshots it was in; peaks).
+    /// </summary>
+    private static StringReader? SummarizeApps(StreamReader? raw, int slot)
+    {
+        if (raw == null) return null;
+        using (raw)
+        {
+            var sys = new SortedDictionary<long, (int N, double Cpu, double Mem, double Gpu, int GpuN)>();
+            var snapshots = new Dictionary<long, HashSet<long>>();
+            var apps = new Dictionary<(long Slot, string Name), (int Seen, double Cpu, float PeakCpu, double Ram, float PeakRam, double Gpu, float PeakGpu, int Count)>();
+            string? line;
+            while ((line = raw.ReadLine()) != null)
+            {
+                var f = line.Split(',');
+                if (f.Length < 6 || !long.TryParse(f[1], Inv, out long t)) continue;
+                long k = t / slot * slot;
+                if (f[0] == "S")
+                {
+                    var c = sys.GetValueOrDefault(k);
+                    float gpu = P(f[4]);
+                    sys[k] = (c.N + 1, c.Cpu + Z(P(f[2])), c.Mem + Z(P(f[3])), c.Gpu + Z(gpu), c.GpuN + (float.IsNaN(gpu) ? 0 : 1));
+                }
+                else if (f[0] == "P")
+                {
+                    if (!snapshots.TryGetValue(k, out var times)) snapshots[k] = times = new();
+                    times.Add(t);
+                    float cpu = Z(P(f[3])), ram = Z(P(f[4])), g = Z(P(f[5]));
+                    int count = f.Length > 7 && int.TryParse(f[7], out int n) ? n : 0;
+                    var a = apps.GetValueOrDefault((k, f[2]));
+                    apps[(k, f[2])] = (a.Seen + 1, a.Cpu + cpu, Math.Max(a.PeakCpu, cpu), a.Ram + ram, Math.Max(a.PeakRam, ram), a.Gpu + g, Math.Max(a.PeakGpu, g), Math.Max(a.Count, count));
+                }
+            }
+            var text = new System.Text.StringBuilder();
+            foreach (var (k, c) in sys)
+                text.Append($"T,{k},{snapshots.GetValueOrDefault(k)?.Count ?? 0},{F((float)(c.Cpu / c.N))},{F((float)(c.Mem / c.N))},{(c.GpuN > 0 ? F((float)(c.Gpu / c.GpuN)) : "")}").Append('\n');
+            foreach (var ((k, name), a) in apps)
+                text.Append($"A,{k},{name},{a.Seen},{F((float)(a.Cpu / a.Seen))},{F(a.PeakCpu)},{F((float)(a.Ram / a.Seen))},{F(a.PeakRam)},{F((float)(a.Gpu / a.Seen))},{F(a.PeakGpu)},{a.Count}").Append('\n');
+            return new StringReader(text.ToString());
+        }
+    }
+
+    private static void ParseApps(TextReader reader, long fromT, long toT, AppHistory into)
+    {
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            var f = line.Split(',');
+            if (f.Length < 6 || !long.TryParse(f[1], Inv, out long t) || t < fromT || t > toT) continue;
+            var time = DateTimeOffset.FromUnixTimeSeconds(t).UtcDateTime;
+            if (f[0] == "T")
+                into.Slots.Add(new AppSlot(time, int.TryParse(f[2], out int n) ? n : 0, P(f[3]), P(f[4]), P(f[5])));
+            else if (f[0] == "A" && f.Length >= 11)
+                into.Apps.Add(new AppPoint(time, string.Intern(f[2]), int.TryParse(f[3], out int seen) ? seen : 1, P(f[4]), P(f[5]), P(f[6]), P(f[7]), P(f[8]), P(f[9]),
+                    int.TryParse(f[10], out int count) ? count : 0));
+        }
+    }
+
+    /// <summary>
+    /// Each app in the range: averages over the snapshots it was recorded in (a snapshot without it isn't
+    /// counted as 0 — it wasn't measured), its peaks, how many slots it was seen in, and its most processes.
+    /// </summary>
+    public static List<AppTotal> AppTotals(AppHistory h) =>
+        h.Apps.GroupBy(a => a.Name, StringComparer.OrdinalIgnoreCase).Select(g =>
+        {
+            double seen = Math.Max(1, g.Sum(a => a.Seen));
+            return new AppTotal(g.Key, g.Sum(a => a.Cpu * a.Seen) / seen, g.Max(a => a.PeakCpu), g.Sum(a => a.RamMB * a.Seen) / seen, g.Max(a => a.PeakRamMB),
+                g.Sum(a => a.Gpu * a.Seen) / seen, g.Max(a => a.PeakGpu), g.Count(), g.Max(a => a.Instances));
+        }).ToList();
+
+    /// <summary>
+    /// An app's sessions: its slots in a row. A slot or two without it (closed for a moment, or under the
+    /// recording threshold) doesn't end one — longer does, and so does any stretch with nothing recorded at all.
+    /// </summary>
+    public static List<AppSession> AppSessions(AppHistory h, string name)
+    {
+        var mine = h.Apps.Where(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)).DistinctBy(a => a.Time).ToDictionary(a => a.Time);
+        var sessions = new List<AppSession>();
+        var run = new List<AppPoint>();
+        int allowed = h.SlotSeconds >= AppSlotSeconds ? 1 : 2, missed = 0;
+        DateTime? previous = null;
+        void Close()
+        {
+            if (run.Count > 0)
+            {
+                double seen = run.Sum(a => a.Seen);
+                sessions.Add(new AppSession(run[0].Time, run[^1].Time.AddSeconds(h.SlotSeconds),
+                    run.Sum(a => a.Cpu * a.Seen) / seen, run.Max(a => a.PeakCpu), run.Sum(a => a.RamMB * a.Seen) / seen, run.Max(a => a.PeakRamMB),
+                    run.Sum(a => a.Gpu * a.Seen) / seen, run.Max(a => a.PeakGpu), run.Max(a => a.Instances)));
+            }
+            run.Clear();
+            missed = 0;
+        }
+        foreach (var slot in h.Slots)
+        {
+            if (previous is DateTime p && (slot.Time - p).TotalSeconds > h.SlotSeconds * 1.5) Close(); // nothing recorded in between
+            previous = slot.Time;
+            if (mine.TryGetValue(slot.Time, out var point)) { run.Add(point); missed = 0; }
+            else if (run.Count > 0 && ++missed > allowed) Close();
+        }
+        Close();
+        return sessions;
+    }
+
+    /// <summary>
+    /// One row per slot of the range for one app: recorded (its averages and peaks, the process count), "not recorded"
+    /// (snapshots were taken, it wasn't in them) or "nothing recorded" (no snapshots at all) — never a made-up 0.
+    /// Invariant numbers and commas, so a script reads it the same on any PC. The PC's own use sits beside it.
+    /// </summary>
+    public static string AppCsv(AppHistory h, string app)
+    {
+        string N(float v) => float.IsNaN(v) ? "" : v.ToString("0.##", Inv);
+        var mine = h.Apps.Where(a => string.Equals(a.Name, app, StringComparison.OrdinalIgnoreCase)).DistinctBy(a => a.Time).ToDictionary(a => a.Time);
+        var slots = h.Slots.DistinctBy(s => s.Time).ToDictionary(s => s.Time);
+        var text = new System.Text.StringBuilder("time,status,cpu_pct,cpu_peak_pct,memory_mb,memory_peak_mb,gpu_pct,gpu_peak_pct,processes,pc_cpu_pct,pc_memory_pct,pc_gpu_pct\n");
+        if (h.Slots.Count == 0) return text.ToString();
+        var now = DateTime.UtcNow;
+        for (var t = h.Slots[0].Time; t <= h.Slots[^1].Time && t <= now; t = t.AddSeconds(h.SlotSeconds))
+        {
+            string when = t.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz", Inv);
+            if (!slots.TryGetValue(t, out var s) || s.Snapshots == 0) { text.Append($"{when},nothing recorded,,,,,,,,,,\n"); continue; }
+            string pc = $"{N(s.Cpu)},{N(s.Mem)},{N(s.Gpu)}";
+            text.Append(mine.TryGetValue(t, out var a)
+                ? $"{when},recorded,{N(a.Cpu)},{N(a.PeakCpu)},{N(a.RamMB)},{N(a.PeakRamMB)},{N(a.Gpu)},{N(a.PeakGpu)},{(a.Instances > 0 ? a.Instances.ToString(Inv) : "")},{pc}\n"
+                : $"{when},not recorded,,,,,,,,{pc}\n");
+        }
+        return text.ToString();
+    }
+
     private const int SysColumns = 12, BatteryColumn = 10, FpsColumn = 11; // S values after the time: cpu … battery, fps
     private static float Max(float a, float b) => float.IsNaN(a) ? b : float.IsNaN(b) ? a : Math.Max(a, b);
     private static float Min(float a, float b) => float.IsNaN(a) ? b : float.IsNaN(b) ? a : Math.Min(a, b);
@@ -290,7 +484,7 @@ public static class HistoryStore
             }
             else if (systemOnly) continue;
             else if (f[0] == "P" && f.Length >= 6)
-                data.Processes.Add(new ProcSample(time, string.Intern(f[2]), P(f[3]), P(f[4]), P(f[5]), f.Length > 6 ? P(f[6]) : float.NaN));
+                data.Processes.Add(new ProcSample(time, string.Intern(f[2]), P(f[3]), P(f[4]), P(f[5]), f.Length > 6 ? P(f[6]) : float.NaN, f.Length > 7 && int.TryParse(f[7], out int n) ? n : 0));
             else if (f[0] == "E")
                 data.Events.Add(new HistoryEvent(time, string.Intern(f[2]), f.Length > 3 ? string.Intern(f[3]) : ""));
         }
