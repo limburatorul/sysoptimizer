@@ -451,6 +451,34 @@ try
           && (double)sessions[0]["avgFps"]! == 90 && (double)sessions[0]["maxFps"]! == 120, "ecosystem: minutes seen, average and best FPS (blank and under 1 ignored, name case ignored)");
     Check(sessions.Count == 2 && (int)sessions[1]["minutes"]! == 1 && (double)sessions[1]["avgFps"]! == 30, "ecosystem: today counts, its unfinished last line doesn't");
 
+    // Controllers' batteries for Shelf (1.18): only with Shelf's card, only the controllers, percent or level as read.
+    string pads = Path.Combine(eco, "data", "sysoptimizer.controllers.json");
+    var readAt = new DateTime(2026, 10, 20, 12, 0, 5, DateTimeKind.Utc).ToLocalTime();
+    var devices = new List<Sysoptimizer.Models.PeripheralBattery>
+    {
+        new() { Name = "DualSense Wireless Controller", Via = "Bluetooth", Percent = 64, ReadAt = readAt },
+        new() { Name = "8BitDo Pro 2", Via = "Bluetooth", Percent = 30, ReadAt = readAt },
+        new() { Name = "WH-1000XM4", Via = "Bluetooth", Percent = 80, ReadAt = readAt },
+        new() { Name = "Xbox controller", Via = "XInput", Level = "Low", ReadAt = readAt },
+        new() { Name = "DualShock 4", Via = "PlayStation, USB", Percent = 70, Charging = true, ReadAt = readAt },
+        new() { Name = "DualSense", Via = "PlayStation, Bluetooth", ReadAt = readAt }, // asleep: unknown
+        new() { Name = "G502 X", Via = "Logitech HID++ (receiver)", Percent = 50, ReadAt = readAt },
+    };
+    File.WriteAllText(Path.Combine(eco, "apps", "shelf.json"), "{\"schema\":1,\"exe\":" + JsonSerializer.Serialize(@"C:\gone\Shelf.exe") + "}");
+    Ecosystem.WriteControllers(devices);
+    Check(!File.Exists(pads), "controllers: nothing written while Shelf's card points at a missing exe");
+    File.WriteAllText(Path.Combine(eco, "apps", "shelf.json"), "{\"schema\":1,\"exe\":" + JsonSerializer.Serialize(self) + "}");
+    Ecosystem.WriteControllers(devices);
+    var padFile = Ecosystem.Read(pads);
+    var padList = (padFile?["controllers"] as System.Text.Json.Nodes.JsonArray)?.Select(n => n!.AsObject()).ToList() ?? new();
+    Check(padFile?["updated"] != null && padList.Select(c => c["name"]!.ToString()).SequenceEqual(new[] { "DualSense Wireless Controller", "8BitDo Pro 2", "Xbox controller", "DualShock 4", "DualSense" }),
+          "controllers: XInput, PlayStation and Bluetooth pads by name; a headset and a Logitech mouse left out");
+    Check(padList.Count == 5 && (int)padList[0]["percent"]! == 64 && padList[0]["level"] == null && padList[2]["percent"] == null && padList[2]["level"]!.ToString() == "Low"
+          && (bool)padList[3]["charging"]! && padList[4]["percent"] == null && padList[4]["level"] == null && padList[0]["readAt"]!.ToString() == "2026-10-20T12:00:05Z"
+          && padList[0]["via"]!.ToString() == "Bluetooth", "controllers: percent or level (null when not said), charging, readAt in UTC");
+    Ecosystem.WriteControllers(new List<Sysoptimizer.Models.PeripheralBattery>());
+    Check(Ecosystem.Read(pads)?["controllers"] is System.Text.Json.Nodes.JsonArray { Count: 0 }, "controllers: none connected is an empty list, not a stale one");
+
     // A failed update check is a failure, never "nothing newer": offline, 403 (GitHub's rate limit), 5xx and an
     // unreadable answer all throw; a readable answer with nothing newer returns null.
     bool CheckFails(string feed)

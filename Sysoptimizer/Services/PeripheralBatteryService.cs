@@ -8,7 +8,8 @@ using static Sysoptimizer.Services.PeripheralReports;
 namespace Sysoptimizer.Services;
 
 /// <summary>
-/// Wireless mice, keyboards, headsets and controllers that report their battery, read every 5 minutes:
+/// Wireless mice, keyboards, headsets and controllers that report their battery, read every 5 minutes (Logitech's
+/// at the user's next keyboard or mouse input after that):
 /// 1. what Windows itself shows in Settings → Bluetooth (the devices' battery property);
 /// 2. Xbox controllers through XInput;
 /// 3. Logitech receivers (Lightspeed, Unifying, Bolt) and wired Logitech devices through HID++ 2.0 — read requests only;
@@ -19,7 +20,7 @@ public sealed class PeripheralBatteryService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(5);
     private List<PeripheralBattery> _latest = new();
-    private DateTime _readAt = DateTime.MinValue;
+    private DateTime _readAt = DateTime.MinValue, _logitechAt = DateTime.MinValue;
     private bool _reading;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -33,45 +34,55 @@ public sealed class PeripheralBatteryService
     }
 
     /// <summary>
-    /// The last reading; asks for a fresh one in the background when it's 5 minutes old. A Lightspeed mouse sleeps
-    /// seconds after it stops moving and then doesn't answer its receiver, so the read waits for the user's next input.
+    /// The last reading; asks for a fresh one in the background when it's 5 minutes old, then shares the controllers'
+    /// batteries with Shelf. A Lightspeed mouse sleeps seconds after it stops moving and then doesn't answer its receiver, so the
+    /// Logitech layer waits for the user's next input; the others read whenever they're due — GetLastInputInfo never
+    /// sees a gamepad, so someone playing on one only would otherwise never get a fresh reading.
     /// ponytail: any input counts, keyboard included; a mouse still asleep is retried 30 s later, its last reading kept meanwhile.
     /// </summary>
     public List<PeripheralBattery> Latest()
     {
-        if (!_reading && DateTime.UtcNow - _readAt > Every && UserJustActive())
+        var now = DateTime.UtcNow;
+        if (_reading) return _latest;
+        bool logitech = now - _logitechAt > Every && UserJustActive();
+        if (now - _readAt <= Every && !logitech) return _latest;
+        _reading = true;
+        Task.Run(() =>
         {
-            _reading = true;
-            Task.Run(() =>
+            try
             {
-                try
+                // A Logitech device not read this time, or asleep (it doesn't answer its receiver): keep its last reading.
+                // ponytail: kept until Sysoptimizer restarts, so an unpaired mouse lingers until then.
+                var fresh = Read(logitech);
+                foreach (var old in _latest.Where(o => o.Via.StartsWith("Logitech") && !fresh.Any(f => f.Name == o.Name)))
                 {
-                    // A Logitech mouse asleep doesn't answer its receiver: keep its last reading rather than drop it.
-                    // ponytail: kept until Sysoptimizer restarts, so an unpaired mouse lingers until then.
-                    var fresh = Read();
-                    foreach (var old in _latest.Where(o => o.Via.StartsWith("Logitech") && !fresh.Any(f => f.Name == o.Name)))
-                    {
-                        old.Asleep = true;
-                        fresh.Add(old);
-                    }
-                    _latest = fresh;
+                    if (logitech) old.Asleep = true;
+                    fresh.Add(old);
                 }
-                finally
-                {
-                    bool asleep = _latest.Any(p => p.Asleep);
-                    (_readAt, _reading) = (asleep ? DateTime.UtcNow - Every + TimeSpan.FromSeconds(30) : DateTime.UtcNow, false);
-                }
-            });
-        }
+                _latest = fresh;
+                Ecosystem.WriteControllers(fresh);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                AppLog.Write($"Couldn't share the controllers' batteries: {ex.Message}");
+            }
+            finally
+            {
+                _readAt = DateTime.UtcNow;
+                if (logitech) _logitechAt = _latest.Any(p => p.Asleep) ? DateTime.UtcNow - Every + TimeSpan.FromSeconds(30) : DateTime.UtcNow;
+                _reading = false;
+            }
+        });
         return _latest;
     }
 
-    public static List<PeripheralBattery> Read()
+    /// <param name="logitech">false skips the Logitech layer: its devices answer only just after the user's input.</param>
+    public static List<PeripheralBattery> Read(bool logitech = true)
     {
         var found = new List<PeripheralBattery>();
         Layer(found, Bluetooth);
         Layer(found, XInput);
-        Layer(found, Logitech);
+        if (logitech) Layer(found, Logitech);
         Layer(found, PlayStation);
         return found;
     }

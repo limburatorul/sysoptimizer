@@ -2,13 +2,16 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Sysoptimizer.Models;
 
 namespace Sysoptimizer.Services;
 
 /// <summary>
 /// The folder the Protagonist Labs apps share on this PC (%APPDATA%\ProtagonistLabs): each app writes its
 /// card in apps\, and what it offers the others in data\. Sysoptimizer writes its card, and for Shelf the
-/// games' sessions from the recorded history (data\sysoptimizer.games.json); it reads the other apps' cards
+/// games' sessions from the recorded history (data\sysoptimizer.games.json) and the controllers' batteries
+/// (data\sysoptimizer.controllers.json); it reads the other apps' cards
 /// for About → Works with. Anything read from here may be missing or broken — that's just "not there".
 /// Kept free of WPF, so the self-test can run it.
 /// </summary>
@@ -59,6 +62,31 @@ public static class Ecosystem
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path + ".tmp", file.ToJsonString(new JsonSerializerOptions { WriteIndented = true })); // UTF-8, no BOM
         File.Move(path + ".tmp", path, overwrite: true);
+    }
+
+    // --- Controllers' batteries, for Shelf's Big Picture ---
+
+    // ponytail: a Bluetooth device counts as a controller by its name only, so a pad named otherwise is missed and an
+    // "Xbox Wireless Headset" gets in; ask Windows for the device's class (gamepad) if that ever matters.
+    private static readonly Regex ControllerName = new("controller|gamepad|dualsense|dualshock|xbox|8bitdo", RegexOptions.IgnoreCase);
+
+    /// <summary>The controllers among a battery reading: XInput and PlayStation pads, and Bluetooth devices named like one.</summary>
+    public static IEnumerable<PeripheralBattery> Controllers(IEnumerable<PeripheralBattery> devices) =>
+        devices.Where(d => d.Via == "XInput" || d.Via.StartsWith("PlayStation") || (d.Via == "Bluetooth" && ControllerName.IsMatch(d.Name)));
+
+    /// <summary>Writes data\sysoptimizer.controllers.json after each battery reading; nothing while Shelf isn't installed.</summary>
+    public static void WriteControllers(IEnumerable<PeripheralBattery> devices)
+    {
+        if (Card("shelf") == null) return;
+        WriteJson(Path.Combine(Folder, "data", "sysoptimizer.controllers.json"), new JsonObject
+        {
+            ["controllers"] = new JsonArray(Controllers(devices).Select(c => (JsonNode)new JsonObject
+            {
+                ["name"] = c.Name, ["via"] = c.Via, ["percent"] = double.IsNaN(c.Percent) ? null : (int)Math.Round(c.Percent),
+                ["level"] = c.Level, ["charging"] = c.Charging,
+                ["readAt"] = c.ReadAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+            }).ToArray()),
+        });
     }
 
     // --- Shelf's games, as the history saw them ---

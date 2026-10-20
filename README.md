@@ -21,6 +21,10 @@ A free Windows 10/11 tune-up tool that shows what it is about to change, and can
 Runs as administrator, because most of the above is machine-wide. No account, no telemetry of its
 own, nothing it talks to online except `winget` when you ask it to.
 
+With Shelf installed, Sysoptimizer leaves it how your games ran (minutes played, average FPS) and your
+controllers' batteries, as files in `%APPDATA%\ProtagonistLabs`; Shelf shows the battery in Big Picture.
+Nothing leaves the PC.
+
 ## Building
 
 Needs the .NET 8 SDK.
