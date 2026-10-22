@@ -57,7 +57,9 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; Started with the installer's own (admin) rights: by default a postinstall entry runs as the signed-in user, and
+; Windows refuses an exe that requires admin from there (CreateProcess error 740).
+Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 [UninstallDelete]
 ; The recorded resource history.
