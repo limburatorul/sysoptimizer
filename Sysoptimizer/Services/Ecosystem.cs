@@ -130,6 +130,17 @@ public static class Ecosystem
         return list;
     }
 
+    /// <summary>(exe, install folder or null) of each game in shelf.games.json that has an exe: the frame rate is kept for these.</summary>
+    public static List<(string Exe, string? Dir)> ShelfGameFolders()
+    {
+        var list = new List<(string, string?)>();
+        if (Read(Path.Combine(Folder, "data", "shelf.games.json"))?["games"] is not JsonArray games) return list;
+        foreach (var g in games.OfType<JsonObject>())
+            if (g["exe"] is JsonValue e && e.TryGetValue(out string? exe) && !string.IsNullOrWhiteSpace(exe))
+                list.Add((exe, g["installDir"] is JsonValue d && d.TryGetValue(out string? dir) && !string.IsNullOrWhiteSpace(dir) ? dir : null));
+        return list;
+    }
+
     /// <summary>
     /// The games' sessions over the last 30 days, from the apps recorded every 10 s (P rows carry the process
     /// name without .exe, so a game matches on its exe's file name). Only the top apps are recorded, which a

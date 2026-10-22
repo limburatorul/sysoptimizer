@@ -232,9 +232,10 @@ public class ResourceMonitor : IDisposable
         if (_diskHealth.IsCompletedSuccessfully && _diskHealth.Result is { } health) snap.DriveHealth = health.Latest();
         snap.Peripherals = _peripherals.Latest();
 
-        // Frames per second: every app's, and the one in front's — a game being played.
-        snap.FpsByPid = _fps.Read();
-        GetWindowThreadProcessId(GetForegroundWindow(), out int front);
+        // Frames per second: the games', and the one in front's — a game being played.
+        var frontWindow = GetForegroundWindow();
+        GetWindowThreadProcessId(frontWindow, out int front);
+        snap.FpsByPid = _fps.Read(front, frontWindow);
         if (snap.FpsByPid.TryGetValue(front, out double fps) && fps >= 1)
         {
             snap.Fps = fps;
