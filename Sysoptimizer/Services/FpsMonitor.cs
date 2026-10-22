@@ -129,15 +129,21 @@ public sealed class FpsMonitor : IDisposable
                 rates[k] = Math.Max(rates.GetValueOrDefault(k), c.Fps);
             }
         }
-        // The kernel's count only for an app with no DXGI or Direct3D 9 presents of its own.
+        // Only the game being played: Shelf's library holds Steam tools too (a dock, Wallpaper Engine) that draw all day
+        // behind it. Its frames are its own process's, or, for a game built on Chromium (NW.js, Electron), those of the
+        // copy of its exe that draws for the window (the GPU process).
         var result = new Dictionary<int, double>();
+        if (front <= 0) return result;
+        string? frontPath = PathFor(front);
+        double best = 0;
         foreach (var g in rates.GroupBy(r => r.Key.Pid))
         {
+            if (g.Key != front && (frontPath == null || !string.Equals(PathFor(g.Key), frontPath, StringComparison.OrdinalIgnoreCase))) continue;
+            // the kernel's count only for an app with no DXGI or Direct3D 9 presents of its own
             double app = g.Where(r => r.Key.Source != 0).Select(r => r.Value).DefaultIfEmpty(0).Max();
-            double fps = app > 0 ? app : g.Max(r => r.Value);
-            // Only the game being played: Shelf's library holds Steam tools too (a dock, Wallpaper Engine) that draw all day behind it.
-            if (fps >= 1 && g.Key == front && IsGame(g.Key, frontWindow)) result[g.Key] = fps;
+            best = Math.Max(best, app > 0 ? app : g.Max(r => r.Value));
         }
+        if (best >= 1 && IsGame(front, frontWindow)) result[front] = best;
         return result;
     }
 
@@ -157,17 +163,23 @@ public sealed class FpsMonitor : IDisposable
     /// </summary>
     private bool IsGame(int pid, IntPtr frontWindow)
     {
-        var now = DateTime.Now;
-        if ((now - _gamesReadAt).TotalMinutes >= 5) ReadGames();
-        if (!_paths.TryGetValue(pid, out var p) || (now - p.Seen).TotalMinutes >= 1)
-            _paths[pid] = p = (PathOf(pid), now); // pids are reused: looked up again each minute
-        if (p.Path is { } path)
+        if ((DateTime.Now - _gamesReadAt).TotalMinutes >= 5) ReadGames();
+        if (PathFor(pid) is { } path)
         {
             if (_gameExes.Contains(path)) return true;
             foreach (var dir in _gameDirs)
                 if (path.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) return true;
         }
         return !_shelf && frontWindow != IntPtr.Zero && FillsScreen(frontWindow);
+    }
+
+    /// <summary>A process's exe without its drive or share (<see cref="Ecosystem.NoRoot"/>); pids are reused, so looked up again each minute.</summary>
+    private string? PathFor(int pid)
+    {
+        var now = DateTime.Now;
+        if (!_paths.TryGetValue(pid, out var p) || (now - p.Seen).TotalMinutes >= 1)
+            _paths[pid] = p = (PathOf(pid) is { } full ? Ecosystem.NoRoot(full) : null, now);
+        return p.Path;
     }
 
     private void ReadGames()
@@ -182,15 +194,15 @@ public sealed class FpsMonitor : IDisposable
             foreach (var name in children?.GetSubKeyNames() ?? [])
             {
                 using var child = children!.OpenSubKey(name);
-                if (child?.GetValue("MatchedExeFullPath") is string exe && exe.Length > 0) exes.Add(exe);
+                if (child?.GetValue("MatchedExeFullPath") is string exe && exe.Length > 0) exes.Add(Ecosystem.NoRoot(exe));
             }
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or IOException or UnauthorizedAccessException) { }
         foreach (var (exe, dir) in Ecosystem.ShelfGameFolders())
         {
-            exes.Add(exe);
+            exes.Add(Ecosystem.NoRoot(exe));
             // a folder only when it is a game's own, not a drive's root
-            if (dir is { Length: > 3 }) dirs.Add(dir.TrimEnd('\\') + "\\");
+            if (dir is { Length: > 3 }) dirs.Add(Ecosystem.NoRoot(dir).TrimEnd('\\') + "\\");
         }
         foreach (var pid in _paths.Where(kv => (now - kv.Value.Seen).TotalMinutes >= 5).Select(kv => kv.Key).ToList()) _paths.Remove(pid);
         (_gameExes, _gameDirs, _shelf) = (exes, dirs, shelf);

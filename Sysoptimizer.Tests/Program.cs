@@ -22,6 +22,11 @@ void Check(bool ok, string what)
 }
 static long Unix(DateTime t) => new DateTimeOffset(t).ToUnixTimeSeconds();
 
+// A game on a mapped network drive is W:\… in Shelf and \\server\share\… to the elevated app: the same once rootless.
+Check(Ecosystem.NoRoot(@"\\10.10.0.253\Games\SteamUnlocked\X\x.exe") == Ecosystem.NoRoot(@"W:\SteamUnlocked\X\x.exe")
+      && Ecosystem.NoRoot(@"\\?\UNC\nas\Games\a.exe") == @"\a.exe" && Ecosystem.NoRoot(@"\\?\C:\a.exe") == @"\a.exe"
+      && Ecosystem.NoRoot(@"C:\Games\a.exe") == @"\Games\a.exe", "fps: a game's path matches whatever drive or share it is reached by");
+
 foreach (var old in Directory.GetDirectories(Path.GetTempPath(), "sysoptimizer-selftest-*")) // earlier runs can't delete their own (today's file is open)
     try { Directory.Delete(old, recursive: true); } catch (IOException) { } // another run still has it
 string folder = Path.Combine(Path.GetTempPath(), "sysoptimizer-selftest-" + Guid.NewGuid().ToString("N")); // never a leftover from an earlier run

@@ -130,6 +130,24 @@ public static class Ecosystem
         return list;
     }
 
+    /// <summary>
+    /// A path without its drive or share: elevated, as Sysoptimizer runs, Windows names an exe on a mapped network drive
+    /// by its share (\\server\share\…), the mapping being the signed-in user's, while Shelf keeps it as W:\…; what
+    /// follows the root is the same.
+    /// </summary>
+    public static string NoRoot(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) path = @"\\" + path[8..];
+        else if (path.StartsWith(@"\\?\")) path = path[4..];
+        if (path.StartsWith(@"\\"))
+        {
+            int share = path.IndexOf('\\', 2);
+            int rest = share < 0 ? -1 : path.IndexOf('\\', share + 1);
+            return rest < 0 ? path : path[rest..];
+        }
+        return path.Length >= 2 && path[1] == ':' ? path[2..] : path;
+    }
+
     /// <summary>(exe, install folder or null) of each game in shelf.games.json that has an exe: the frame rate is kept for these.</summary>
     public static List<(string Exe, string? Dir)> ShelfGameFolders()
     {
