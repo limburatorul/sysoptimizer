@@ -1060,6 +1060,12 @@
                                     </Border>
                                     <Border>
                                         <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"><Hyperlink Click="WhatsNew_Click">What's new</Hyperlink></TextBlock>
+                                            <TextBlock Text="Every release, month by month — also in the tray menu." Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border>
+                                        <StackPanel>
                                             <TextBlock FontWeight="SemiBold"><Hyperlink Click="ConnectClaude_Click">Connect to Claude</Hyperlink></TextBlock>
                                             <TextBlock Text="Lets Claude read your recorded history and answer questions like &quot;what slowed my PC down yesterday?&quot;" Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
                                         </StackPanel>

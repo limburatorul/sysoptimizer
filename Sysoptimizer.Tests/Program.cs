@@ -550,6 +550,16 @@ catch (Exception ex)
     Check(false, $"threw {ex.GetType().Name}: {ex.Message}");
 }
 
+// What's new reads whatsnew.txt from the exe: every release header must parse, newest first.
+using (var notes = new StreamReader(typeof(Updater).Assembly.GetManifestResourceStream("Sysoptimizer.whatsnew.txt")!))
+{
+    var heads = notes.ReadToEnd().Split('\n').Where(l => l.StartsWith("## ")).Select(l => l[3..].Split(" | ", 3)).ToList();
+    bool parsed = heads.Count > 0 && heads.All(h => h.Length == 3 && Version.TryParse(h[0].Trim(), out _)
+        && DateTime.TryParseExact(h[1].Trim(), "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _));
+    Check(parsed, "what's new: every release header parses");
+    Check(parsed && heads.Zip(heads.Skip(1)).All(p => Version.Parse(p.First[0].Trim()) > Version.Parse(p.Second[0].Trim())), "what's new: newest first");
+}
+
 Console.WriteLine(failures == 0 ? "\nAll checks passed." : $"\n{failures} check(s) failed.");
 try { Directory.Delete(folder, recursive: true); } catch (IOException) { } // today's file is still held open by the writer
 return failures == 0 ? 0 : 1;

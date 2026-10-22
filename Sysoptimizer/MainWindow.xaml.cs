@@ -281,6 +281,8 @@ public partial class MainWindow : Window
         SetLinkText(CheckUpdatesLink, answer ?? "Check for updates");
     }
 
+    private void WhatsNew_Click(object sender, RoutedEventArgs e) => WhatsNewWindow.Open();
+
     private static void SetLinkText(System.Windows.Documents.Hyperlink link, string text)
     {
         link.Inlines.Clear();

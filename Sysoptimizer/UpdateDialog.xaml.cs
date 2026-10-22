@@ -5,33 +5,21 @@ using Sysoptimizer.Services;
 
 namespace Sysoptimizer;
 
-/// <summary>"Update available" — and, after an update has landed, the same window as a read-only "What's new".</summary>
+/// <summary>"Update available": the new version's notes, Later or Update now. (What's new after an update is WhatsNewWindow.)</summary>
 public partial class UpdateDialog : Window
 {
     private readonly Updater.Release _release;
     private readonly CancellationTokenSource _cancel = new();
 
-    public UpdateDialog(Window owner, Updater.Release release, bool notesOnly = false)
+    public UpdateDialog(Window owner, Updater.Release release)
     {
         InitializeComponent();
         Owner = owner;
         _release = release;
         SourceInitialized += (_, _) => WindowGlass.EnableAcrylic(this);
         Notes.Text = release.Notes.Trim() == "" ? "No release notes." : release.Notes.Trim();
-
-        if (notesOnly)
-        {
-            Title = "What's new";
-            Heading.Text = $"Sysoptimizer {release.Version}";
-            Sub.Text = "Updated on this machine.";
-            UpdateButton.Visibility = Visibility.Collapsed;
-            LaterButton.Content = "Close";
-        }
-        else
-        {
-            Heading.Text = $"Sysoptimizer {release.Version} is available";
-            Sub.Text = $"You have {Updater.Current}. The installer is {CleanupService.FormatSize(release.AssetSize)}.";
-        }
+        Heading.Text = $"Sysoptimizer {release.Version} is available";
+        Sub.Text = $"You have {Updater.Current}. The installer is {CleanupService.FormatSize(release.AssetSize)}.";
         Closed += (_, _) => _cancel.Cancel();
     }
 

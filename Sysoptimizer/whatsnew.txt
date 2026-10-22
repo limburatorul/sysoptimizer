@@ -1,0 +1,118 @@
+# Every release's notes, newest first, shown by What's new (WhatsNewWindow.cs). Built into the exe.
+# "## version | date | title", one entry per x.y with its patches; then the notes: "- " a point,
+# a line in ** ** a heading, anything else a paragraph. A release with a picture of its own has
+# WhatsNew\<x.y>.jpg (1920 x 340, made from the studio's banner template, the month it came out).
+
+## 1.19 | 2026-10-22 | FPS you can trust, for the game you're playing
+Sysoptimizer now counts frames the way RivaTuner does, and only for the game in front of you.
+**Frame rate, measured right**
+- Frames are counted per swap chain by their own timestamps, as RivaTuner counts them. Side by side with RivaTuner the rate matched within **about 1%** on six games: Unity (DirectX 11), Unreal Engine 4, DirectX 12, DirectX 9 at up to 670 FPS, and Vulkan.
+- FPS is shown only for the game in front. With Shelf installed, a game is anything in your Shelf library; without it, a game in Windows' own game list or an app running full screen.
+- Games on a mapped network drive are recognised, and Chromium-based games are measured from their GPU process, where their frames are drawn.
+**Also**
+- The installer's **Launch Sysoptimizer** box starts the app with admin rights, instead of failing with "requires elevation" (error 740).
+- New: What's new, this window. It opens once after an update, and any time from the tray menu or Settings.
+
+## 1.18 | 2026-10-20 | Controller batteries for Shelf
+- Your controllers' batteries (Xbox, DualShock 4, DualSense and Bluetooth gamepads) are shared with Shelf, so it can show them in Big Picture.
+- Controllers are read every 5 minutes even if you only touch the gamepad, not the keyboard or mouse.
+
+## 1.17 | 2026-10-19 | App history, per app
+- **Activity → App history**: every app recorded in the last hour, day, week or month, searchable and sorted by average or peak CPU, memory or GPU. Pick one for its own charts, its share of what the PC used, and its sessions.
+- **Export…** saves one app's history as CSV with a short summary of the PC; **Export all apps…** zips them. No PC name, user name or paths go in.
+- More apps recorded: every app above 0.5% CPU, 0.5% GPU or 100 MB, about **53** per snapshot instead of 10, for about 2.2 MB a day.
+- A month of one app opens in about **72 ms**, thanks to a small index built for each finished day.
+
+## 1.16 | 2026-10-18 | Wireless batteries
+- Wireless mice, keyboards, headsets and controllers that report a battery show it under **Hardware → Wireless devices** and in the tray tooltip, read every 5 minutes.
+- Works with the Bluetooth battery Windows shows, Xbox controllers, Logitech mice and keyboards, and DualShock 4 / DualSense.
+- A new alert tells you when a wireless device drops under 20% (you choose the number).
+
+## 1.15 | 2026-10-18 | A calmer window
+- Eight tabs became five plus Settings. History's 20 buttons became a range list, four metrics and a menu; a watched PC is one line with a grouped menu.
+- Watts and fans moved onto the CPU and GPU lines, and the health score moved to Tools.
+- Updates are checked every hour, and a check that fails says so instead of claiming you're up to date.
+- The tray menu follows the Windows theme and stays readable on hover.
+- A portable copy updates itself in place, and the exe states in full who made it, which settled an antivirus false alarm.
+
+## 1.14 | 2026-10-15 | Works with the other Protagonist Labs apps
+- Sysoptimizer tells Shelf how your games ran: minutes played, average and best FPS per day, from the last 30 days.
+- **About → Works with** opens Shelf or its page, with one quiet discount line if you already own one of our apps.
+
+## 1.13 | 2026-10-14 | Transfers you can follow, and what changed on your PC
+- Every file sent to or copied from a watched PC gets a row with its progress, speed and time left.
+- **What changed**: apps installed, removed or updated, Windows updates and new drivers, marked on the History chart and listed in Events.
+- From the last 7 days, under System health: memory running short and who held it, apps holding gigabytes, the CPU at 90 °C, Windows starting slower than the week before.
+- A log file in ProgramData keeps every message and any crash, and a watching PC can read it.
+
+## 1.12 | 2026-10-14 | Copy files off a watched PC, and a lighter app
+- **Get files…** copies files from a watched PC's Downloads, Desktop or Documents to this one.
+- A schedule entry can run on every watched PC at once.
+- The window opens faster (first frame **1.28 s → 0.79 s**), History lets go of its memory when you leave it (**146 → 18 MB**), and nothing is drawn while the app sits in the tray.
+
+## 1.11 | 2026-10-14 | Compare, send files, act on every PC
+- **History → Compare** draws the same length of time just before your range as a dashed line, with the averages, peaks and the change between them.
+- Send files to a watched PC by dropping them on its card. They land in its Downloads, marked as from the internet.
+- **All PCs ⋯** runs updates, cleanup, restart and more on every watched PC at once.
+- History stays fluid on a whole day of per-second data: drag at about **62 fps**, and the refresh takes 15 ms instead of up to 90.
+
+## 1.10 | 2026-10-13 | FPS, drive health, electricity cost, eleven themes
+- **FPS** for the app in front, recorded every second and charted in History, per app too.
+- **Drive health** on the Disks tab: temperature, life left, spare blocks, hours on and data written, with an alert when a drive is failing.
+- **Electricity**: set a price per kWh and the Power chart shows what a range cost, a month at that pace, and each app's share.
+- Seven new themes (Fallout, Diablo, Mass Effect, Halo, Matrix, Witcher, Starfield), picked from a list that previews each one as you hover it.
+- A watched PC's card shows one reading per line, always in the same order.
+
+## 1.9 | 2026-10-13 | Schedules, a weekly report, boot times, a phone page
+- **Optimize → Schedule**: update apps, clean up, restart, shut down or wake a PC on chosen days at a set time.
+- A **weekly report** every Monday: typical and peak readings, the busiest apps, alerts, and how long Windows took to start.
+- **Windows starts**: how long each boot took and which programs held it up.
+- A read-only **phone page** with its own password, on your home network only.
+- Update or wake a watched PC remotely. Clearing an app search brings the popular list back.
+
+## 1.8 | 2026-10-13 | Watched PCs at a glance
+- A card for each watched PC on Resources: online, CPU and temperature, memory, GPU, its fullest disk and battery, with actions in reach.
+- Passwords instead of a long key, and **Find on this network** to add a PC.
+- Apps ranked by the energy Windows itself measured, and new alerts for an app's memory, a full disk or a low battery.
+- History takes about 30% less space.
+
+## 1.7 | 2026-10-13 | Install apps on a watched PC
+- Install apps from the winget list, or send an .exe or .msi, to a watched PC. It announces each install and reports how it went.
+- Power and Battery rank apps by estimated watts.
+- A Log button in the bottom bar; the log starts hidden.
+
+## 1.6 | 2026-10-08 | Power, fans, battery
+- CPU and GPU power in watts, every spinning fan and a laptop's battery, shown live and recorded in History.
+- **Export…** saves the range on screen as a CSV that Excel opens in columns.
+- Alerts for watched PCs: temperatures, memory, and when one stops answering.
+
+## 1.5 | 2026-10-08 | Watch another PC
+- Share this PC's history on your network, and watch another PC's live resources and history from here, signed and encrypted.
+- **Alerts**: a hot CPU or GPU, memory, an app's sustained CPU, an unsigned app starting.
+- **Events**: launches, sleep and wake, starts and alerts; a click opens History at that moment.
+- History records disk and network too, and the PC you were showing is remembered.
+
+## 1.4 | 2026-10-08 | Fewer tabs, polished themes
+- Eleven tabs became eight, and every theme got themed text boxes, tooltips and menus.
+- Hovering the History chart shows the five apps using the most at that moment.
+
+## 1.3 | 2026-10-07 | A calm History chart, and recording that never stops
+- History draws calm plateaus, zooms with the mouse wheel and pans with a right-drag. The temperature band warms from indigo to red.
+- Sysoptimizer keeps recording under full CPU load, and always records in the background from the tray.
+- A Cyberpunk theme, and an About tab.
+
+## 1.2 | 2026-10-06 | Ten tabs on one row
+- Sixteen tabs on two rows became ten on one.
+- History follows the overview strip as you drag it; click to pin a moment, drag to zoom into a stretch.
+
+## 1.1 | 2026-10-06 | Recorded history
+- **History**: CPU, memory, GPU and temperatures every second, the top apps every 10 seconds, kept for months at about 1 MB a day.
+- **Processes** with end task and blocking an app from starting; **Privacy** shows which apps used the camera, microphone or location.
+- Ask Claude about your PC's history with **Connect to Claude**.
+
+## 1.0 | 2026-09-28 | Sysoptimizer
+The first release: a Windows tune-up tool that shows what it is about to change, and can change it back.
+- Live resource graphs, per-thread CPU graphs, and the processor's clock and uptime.
+- Revertible tweaks with a restore point, cleanup with an analyze step, services, startup apps, debloat, winget installs and a DNS switcher.
+- A system health score with **Optimize now**, duplicate and large file finders, and an uninstaller that spots leftovers.
+- Glass, Star Trek and StarCraft themes, an installer, and updates that install themselves.

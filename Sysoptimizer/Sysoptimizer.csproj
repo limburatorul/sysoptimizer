@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Sysoptimizer</AssemblyName>
-    <Version>1.19.2</Version>
+    <Version>1.19.3</Version>
     <Product>Sysoptimizer</Product>
     <AssemblyTitle>Sysoptimizer</AssemblyTitle>
     <Description>A Windows 10/11 tune-up tool that shows what it is about to change, and can change it back</Description>
@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <Resource Include="app.ico" />
+    <EmbeddedResource Include="whatsnew.txt" LogicalName="Sysoptimizer.whatsnew.txt" />
+    <EmbeddedResource Include="WhatsNew\*.jpg" LogicalName="Sysoptimizer.WhatsNew.%(Filename).jpg" />
   </ItemGroup>
 
   <ItemGroup>

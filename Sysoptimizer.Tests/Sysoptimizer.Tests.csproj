@@ -24,6 +24,7 @@
     <Compile Include="..\Sysoptimizer\Services\CleanupService.cs" Link="CleanupService.cs" />
     <Compile Include="..\Sysoptimizer\Services\PeripheralReports.cs" Link="PeripheralReports.cs" />
     <Compile Include="..\Sysoptimizer\Models\ResourceSnapshot.cs" Link="ResourceSnapshot.cs" />
+    <EmbeddedResource Include="..\Sysoptimizer\whatsnew.txt" LogicalName="Sysoptimizer.whatsnew.txt" />
   </ItemGroup>
 
 </Project>

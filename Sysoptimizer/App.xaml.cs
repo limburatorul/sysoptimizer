@@ -38,6 +38,7 @@ public partial class App : System.Windows.Application
         var window = new MainWindow();
         MainWindow = window;
         if (!e.Args.Contains(BackgroundMode.TrayArgument)) window.Show();
+        WhatsNewWindow.OpenOnceAfterUpdate();
 
         new Thread(() =>
         {
