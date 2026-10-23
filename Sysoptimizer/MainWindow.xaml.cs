@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -24,8 +24,6 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<OptionItem> _bloatwareItems = new();
     private readonly ObservableCollection<DuplicateGroupView> _duplicateGroups = new();
     private readonly ObservableCollection<OptionItem> _largeFileItems = new();
-    private readonly ObservableCollection<OptionItem> _installedAppItems = new();
-    private readonly ObservableCollection<OptionItem> _leftoverItems = new();
     private readonly List<Tweak> _tweaks = TweakService.GetTweaks();
 
     private class DuplicateGroupView
@@ -58,7 +56,7 @@ public partial class MainWindow : Window
         public required Queue<(DateTime Time, double Value)> History;
         public required bool AutoScale;
         public bool ShowAxis = true;
-        public double AxisTopInset; // keeps the top label clear of a top-right control (the CPU card's "Per thread" checkbox)
+        public double AxisTopInset; // keeps the top label off the card's rounded top edge
         public double DisplayValue = double.NaN; // eased towards the latest real sample — see DrawSparkline
         // Subtle horizontal gridlines with their value to the left, built lazily on first draw — see UpdateAxisGridlines.
         public System.Windows.Shapes.Line[]? GridLines;
@@ -79,8 +77,8 @@ public partial class MainWindow : Window
         ThemeManager.ThemeChanged += OnThemeChanged;
         InitThemePicker();
 
-        _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 40 });
-        _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 46 });
+        _liveGraphs.Add(new GraphBinding { Container = CpuGraphGrid, Line = CpuSparkline, Fill = CpuAreaFill, History = _cpuHistory, AutoScale = false, AxisTopInset = 6 });
+        _liveGraphs.Add(new GraphBinding { Container = MemGraphGrid, Line = MemSparkline, Fill = MemAreaFill, History = _memHistory, AutoScale = false, AxisTopInset = 6 });
         _liveGraphs.Add(new GraphBinding { Container = GpuGraphGrid, Line = GpuSparkline, Fill = GpuAreaFill, History = _gpuHistory, AutoScale = false, AxisTopInset = 6 });
         // The live graphs redraw every frame — but only while one can be seen: subscribed, Rendering keeps WPF
         // drawing 60 frames a second even with the window hidden in the tray, where it lives most of the day.
@@ -128,11 +126,6 @@ public partial class MainWindow : Window
 
         DuplicatesList.ItemsSource = _duplicateGroups;
         LargeFilesList.ItemsSource = _largeFileItems;
-        InstalledAppsList.ItemsSource = _installedAppItems;
-        LeftoversList.ItemsSource = _leftoverItems;
-
-        foreach (var app in UninstallService.GetInstalledApps())
-            _installedAppItems.Add(new OptionItem { Name = app.Name, Description = $"{app.Publisher} {app.Version}".Trim(), Tag = app });
 
         DnsAdapterCombo.ItemsSource = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
@@ -184,6 +177,11 @@ public partial class MainWindow : Window
             AddWorksWith(Link("Shelf", () => OpenUnelevated(shelf)), " · shows how each of your games ran here (minutes played, average FPS) on its page, and your controller's battery in Big Picture");
         else
             AddWorksWith(Link("Shelf", () => OpenUrl($"https://protagonistlabs.app/shelf/?{utm}")), " · would show how each of your games ran here (minutes played, average FPS) on its page, and your controller's battery in Big Picture");
+        // Uninstalling moved to Uproot in 1.21; both run as administrator, so it is started straight from here.
+        if (Ecosystem.SisterExe("uproot", "Uproot") is { } uproot)
+            AddWorksWith(Link("Uproot", () => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uproot) { UseShellExecute = true })), " · uninstalls apps, with the folders and registry keys they leave behind");
+        else
+            AddWorksWith(Link("Uproot", () => OpenUrl("https://github.com/limburatorul/uproot/releases/latest")), " · would uninstall apps, with the folders and registry keys they leave behind");
 
         if (!Ecosystem.BoughtSomething()) return;
         var missing = PaidApps.Where(a => Ecosystem.SisterExe(a.Id, a.Name) == null).Take(4).ToList();
@@ -1242,46 +1240,6 @@ public partial class MainWindow : Window
             catch (Exception ex) { Log($"{item.Name}: failed — {ex.Message}"); }
         }
         Log($"Deleted {deleted} files, {CleanupService.FormatSize(freed)} freed.");
-    }
-
-    // --- Uninstall ---
-
-    private async void UninstallApps_Click(object sender, RoutedEventArgs e)
-    {
-        foreach (var item in _installedAppItems.Where(i => i.IsChecked).ToList())
-        {
-            var app = (InstalledApp)item.Tag!;
-            Log($"{app.Name}: launching uninstaller...");
-            var (ok, message) = await Task.Run(() =>
-            {
-                bool result = UninstallService.Uninstall(app, out string msg);
-                return (result, msg);
-            });
-            if (!ok) { Log($"{app.Name}: failed — {message}"); continue; }
-
-            _installedAppItems.Remove(item);
-            string? leftover = UninstallService.FindLeftoverFolder(app);
-            if (leftover != null)
-            {
-                _leftoverItems.Add(new OptionItem { Name = app.Name, Description = leftover, Tag = leftover });
-                DeleteLeftoversButton.Visibility = Visibility.Visible;
-                Log($"{app.Name}: uninstalled — its install folder is still there.");
-            }
-            else
-            {
-                Log($"{app.Name}: uninstalled.");
-            }
-        }
-    }
-
-    private void DeleteLeftovers_Click(object sender, RoutedEventArgs e)
-    {
-        foreach (var item in _leftoverItems.Where(i => i.IsChecked).ToList())
-        {
-            try { Directory.Delete((string)item.Tag!, recursive: true); Log($"{item.Name}: leftover folder removed."); _leftoverItems.Remove(item); }
-            catch (Exception ex) { Log($"{item.Name}: failed — {ex.Message}"); }
-        }
-        if (_leftoverItems.Count == 0) DeleteLeftoversButton.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>

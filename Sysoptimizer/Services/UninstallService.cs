@@ -1,6 +1,4 @@
-using System.IO;
-using System.Diagnostics;
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 
 namespace Sysoptimizer.Services;
 
@@ -38,40 +36,5 @@ public static class UninstallService
         }
 
         return apps.GroupBy(a => a.Name).Select(g => g.First()).OrderBy(a => a.Name).ToList();
-    }
-
-    /// <summary>Launches the app's own uninstaller and waits for it to finish (most run their own UI).</summary>
-    public static bool Uninstall(InstalledApp app, out string message)
-    {
-        try
-        {
-            var (file, args) = SplitCommand(app.UninstallString);
-            using var proc = Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = true });
-            proc?.WaitForExit();
-            message = "done";
-            return true;
-        }
-        catch (Exception ex)
-        {
-            message = ex.Message;
-            return false;
-        }
-    }
-
-    /// <summary>The install folder left behind if the uninstaller didn't remove it — the one leftover
-    /// location the registry actually tells us about, rather than a guess by app name.</summary>
-    public static string? FindLeftoverFolder(InstalledApp app) =>
-        !string.IsNullOrWhiteSpace(app.InstallLocation) && Directory.Exists(app.InstallLocation) ? app.InstallLocation : null;
-
-    private static (string file, string args) SplitCommand(string command)
-    {
-        command = command.Trim();
-        if (command.StartsWith('"'))
-        {
-            int end = command.IndexOf('"', 1);
-            if (end > 0) return (command[1..end], command[(end + 1)..].Trim());
-        }
-        int space = command.IndexOf(' ');
-        return space < 0 ? (command, "") : (command[..space], command[(space + 1)..].Trim());
     }
 }

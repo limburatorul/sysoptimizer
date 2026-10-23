@@ -3,6 +3,10 @@
 # a line in ** ** a heading, anything else a paragraph. A release with a picture of its own has
 # WhatsNew\<x.y>.jpg (1920 x 340, made from the studio's banner template, the month it came out).
 
+## 1.21 | 2026-10-23 | Cleaner graphs, one job less
+- The **100%** mark sits back at the top of the CPU and Memory graphs: the Per thread and Free memory buttons moved left of the scale instead of pushing it down.
+- **Uninstall** has left Tools → Clean. Our new free app **Uproot** does it better: a list that opens and searches instantly, several apps at once, and the folders and registry keys they leave behind. It's in About → Works with.
+
 ## 1.20 | 2026-10-23 | One home for every Protagonist Labs app
 Sysoptimizer moves in with the studio's other apps: one folder for the programs, one for their data.
 - The app now lives in **Program Files\ProtagonistLabs\Sysoptimizer**. The old Program Files\Sysoptimizer folder is removed when you update.
