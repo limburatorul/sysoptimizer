@@ -180,13 +180,13 @@ public partial class MainWindow : Window
     {
         const string utm = "utm_source=sysoptimizer&utm_medium=app&utm_campaign=works-with";
         WorksWithList.Children.Clear();
-        if (Ecosystem.Card("shelf")?["exe"]?.ToString() is { } shelf) // Card checked it is a path that exists
+        if (Ecosystem.SisterExe("shelf", "Shelf") is { } shelf) // a local path that exists
             AddWorksWith(Link("Shelf", () => OpenUnelevated(shelf)), " · shows how each of your games ran here (minutes played, average FPS) on its page, and your controller's battery in Big Picture");
         else
             AddWorksWith(Link("Shelf", () => OpenUrl($"https://protagonistlabs.app/shelf/?{utm}")), " · would show how each of your games ran here (minutes played, average FPS) on its page, and your controller's battery in Big Picture");
 
         if (!Ecosystem.BoughtSomething()) return;
-        var missing = PaidApps.Where(a => Ecosystem.Card(a.Id) == null).Take(4).ToList();
+        var missing = PaidApps.Where(a => Ecosystem.SisterExe(a.Id, a.Name) == null).Take(4).ToList();
         if (missing.Count == 0) return;
         var line = AddWorksWith(new Run("Owners of one of our apps get 30% off the others: "), "");
         line.Margin = new Thickness(0, 6, 0, 0);

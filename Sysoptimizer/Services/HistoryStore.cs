@@ -29,7 +29,7 @@ public sealed record AppTotal(string Name, double Cpu, float PeakCpu, double Ram
 public sealed record AppSession(DateTime Start, DateTime End, double Cpu, float PeakCpu, double RamMB, float PeakRamMB, double Gpu, float PeakGpu, int Processes);
 
 /// <summary>
-/// The recorded history: one plain-text file per local day under ProgramData (writable by the elevated
+/// The recorded history: one plain-text file per local day in DataFolder (writable by the elevated
 /// app, readable by the non-elevated MCP server). Lines:
 ///   S,unixSeconds,cpu,mem,gpu,cpuTemp,gpuTemp,diskMBs,netMbps,cpuW,gpuW,fanRpm,battery%,fps (the app in front)
 ///                                                 — every second (blank when unknown; older files end
@@ -48,8 +48,48 @@ public static class HistoryStore
     public const int MaxRetentionDays = 366;
     /// <summary>Set by the app from the user's choice; days older than this are deleted at each day change.</summary>
     public static int RetentionDays { get; set; } = 90;
-    /// <summary>Settable for the self-test, which works in a temp folder.</summary>
-    public static string Folder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sysoptimizer", "history");
+    /// <summary>All of the app's data (history, log, the lists ChangeService keeps), the studio's folder since 1.20. The app runs
+    /// elevated as the signed-in user, so this is that user's Roaming folder, the same one the non-elevated MCP server sees.</summary>
+    public static readonly string DataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ProtagonistLabs", "Sysoptimizer");
+    /// <summary>Where everything was kept before 1.20.</summary>
+    public static readonly string OldDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sysoptimizer");
+    /// <summary>Settable for the self-test, which works in a temp folder. The old folder while the move hasn't happened yet:
+    /// the MCP server may read before the app has started once since the update.</summary>
+    public static string Folder { get; set; } = Path.Combine(Directory.Exists(OldDataFolder) && !Directory.Exists(DataFolder) ? OldDataFolder : DataFolder, "history");
+
+    /// <summary>
+    /// Moves the data folder from where it was to where it goes, once (the installer does the same while the app is stopped;
+    /// this covers a silent update and an install made from another admin account). Returns the folder to use now and, in
+    /// <paramref name="note"/>, a line for the log. The same volume, so a rename: instant at any size, never half done.
+    /// When it fails (a file held open) the old folder is used this time and the move is tried at the next start. A new
+    /// folder that already has data is never mixed with the old one.
+    /// </summary>
+    public static string MoveData(string from, string to, out string? note)
+    {
+        note = null;
+        if (!Directory.Exists(from)) return to;
+        if (Directory.Exists(to) && Directory.EnumerateFileSystemEntries(to).Any())
+        {
+            note = $"Data left in {from}: {to} already has data";
+            return to;
+        }
+        try
+        {
+            if (Directory.Exists(to)) Directory.Delete(to);
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            Directory.Move(from, to);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            note = $"Couldn't move the data to {to} ({ex.Message}); using {from} until the next start";
+            return from;
+        }
+        // A rename keeps ProgramData's permissions, where the user could read but not delete their own files: take the new parent's.
+        using (var icacls = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("icacls.exe", $"\"{to}\" /reset /T /C /Q") { CreateNoWindow = true, UseShellExecute = false }))
+            icacls?.WaitForExit(60_000);
+        note = $"Data moved from {from} to {to}";
+        return to;
+    }
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
     private static readonly object Gate = new();

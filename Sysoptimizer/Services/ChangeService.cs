@@ -10,7 +10,7 @@ namespace Sysoptimizer.Services;
 /// </summary>
 public static class ChangeService
 {
-    public static string Folder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sysoptimizer");
+    public static string Folder { get; set; } = HistoryStore.DataFolder;
 
     /// <summary>What appeared, went or changed version between two lists (name → version).</summary>
     public static List<(string Kind, string Detail)> Diff(IReadOnlyDictionary<string, string> before, IReadOnlyDictionary<string, string> now)

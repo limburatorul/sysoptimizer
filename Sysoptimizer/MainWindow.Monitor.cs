@@ -435,6 +435,34 @@ public partial class MainWindow
         Log("Claude Code: the setup command is on your clipboard — paste it into a terminal.");
     }
 
+    /// <summary>
+    /// 1.20 moved the app from Program Files\Sysoptimizer to Program Files\ProtagonistLabs\Sysoptimizer, so a connector set up
+    /// before points at an exe that is gone: Claude Desktop's config (written by Connect to Claude) and Claude Code's
+    /// ~/.claude.json (from the command it put on the clipboard). Only that exact old path is replaced, nothing else touched.
+    /// </summary>
+    internal static void RepointClaude()
+    {
+        string server = Path.Combine(AppContext.BaseDirectory, "sysoptimizer-mcp.exe");
+        string old = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Sysoptimizer", "sysoptimizer-mcp.exe");
+        if (!File.Exists(server) || server.Equals(old, StringComparison.OrdinalIgnoreCase)) return;
+        string from = JsonEncodedText.Encode(old).ToString(), to = JsonEncodedText.Encode(server).ToString();
+        var configs = ClaudeDesktopConfigDirs().Select(d => Path.Combine(d, "claude_desktop_config.json"))
+            .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json"));
+        foreach (string config in configs)
+        {
+            try
+            {
+                if (!File.Exists(config)) continue;
+                string text = File.ReadAllText(config);
+                if (!text.Contains(from, StringComparison.OrdinalIgnoreCase)) continue;
+                File.WriteAllText(config + ".tmp", text.Replace(from, to, StringComparison.OrdinalIgnoreCase));
+                File.Move(config + ".tmp", config, overwrite: true);
+                AppLog.Write($"Claude connector now starts {server} ({config})");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { AppLog.Write($"Couldn't repoint the Claude connector in {config}: {ex.Message}"); }
+        }
+    }
+
     /// <summary>Classic install keeps its config in %APPDATA%\Claude; the Store (MSIX) build virtualizes it under its package.</summary>
     private static IEnumerable<string> ClaudeDesktopConfigDirs()
     {

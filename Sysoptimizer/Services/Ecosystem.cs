@@ -25,12 +25,38 @@ public static class Ecosystem
     public static void WriteCard(string exe, Version version) => WriteJson(Path.Combine(Folder, "apps", "sysoptimizer.json"), new JsonObject
     {
         ["id"] = "sysoptimizer", ["name"] = "Sysoptimizer", ["version"] = version.ToString(3), ["exe"] = exe,
-        ["edition"] = "free", ["paid"] = false, ["page"] = Page, ["commands"] = new JsonObject(),
+        ["edition"] = "free", ["paid"] = false, ["page"] = Page, ["commands"] = new JsonObject(), ["data"] = ChangeService.Folder,
     });
 
     /// <summary>Another app's card, or null when it's missing, unreadable or its exe is gone (uninstalled).</summary>
     public static JsonObject? Card(string id) =>
         Read(Path.Combine(Folder, "apps", id + ".json")) is { } card && card["exe"] is JsonValue v && v.TryGetValue(out string? exe) && File.Exists(exe) ? card : null;
+
+    /// <summary>A sister's exe: from its card first, else from its Uninstall entry (per-machine in either registry view, or
+    /// per-user) for one that hasn't run since it was installed. Null when it isn't installed.</summary>
+    public static string? SisterExe(string id, string name)
+    {
+        if (Card(id)?["exe"]?.ToString() is { } exe) return exe;
+        var displayName = new Regex($"^{Regex.Escape(name)}( \\d[\\d.]*)?$", RegexOptions.IgnoreCase); // Electron's NSIS adds the version
+        foreach (var (hive, view) in new[] { (Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64),
+                     (Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry32), (Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default) })
+        {
+            try
+            {
+                using var root = Microsoft.Win32.RegistryKey.OpenBaseKey(hive, view);
+                using var uninstall = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
+                foreach (var sub in uninstall?.GetSubKeyNames() ?? [])
+                {
+                    using var app = uninstall!.OpenSubKey(sub);
+                    if (app?.GetValue("DisplayName") is not string dn || !displayName.IsMatch(dn) || app.GetValue("DisplayIcon") is not string icon) continue;
+                    string path = icon.Split(',')[0].Trim('"');
+                    if (path.Length > 3 && path[1] == ':' && path[2] == '\\' && File.Exists(path)) return path; // local paths only, never \\host
+                }
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or IOException or UnauthorizedAccessException) { }
+        }
+        return null;
+    }
 
     /// <summary>Someone bought a Protagonist Labs app: the "30% off for you" line may be shown.</summary>
     public static bool BoughtSomething()
@@ -77,7 +103,7 @@ public static class Ecosystem
     /// <summary>Writes data\sysoptimizer.controllers.json after each battery reading; nothing while Shelf isn't installed.</summary>
     public static void WriteControllers(IEnumerable<PeripheralBattery> devices)
     {
-        if (Card("shelf") == null) return;
+        if (SisterExe("shelf", "Shelf") == null) return;
         WriteJson(Path.Combine(Folder, "data", "sysoptimizer.controllers.json"), new JsonObject
         {
             ["controllers"] = new JsonArray(Controllers(devices).Select(c => (JsonNode)new JsonObject

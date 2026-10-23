@@ -9,7 +9,7 @@ namespace Sysoptimizer.Services;
 /// </summary>
 public static class AppLog
 {
-    public static string File { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sysoptimizer", "sysoptimizer.log");
+    public static string File { get; set; } = Path.Combine(HistoryStore.DataFolder, "sysoptimizer.log");
     private const long MaxBytes = 2 << 20;
     private static readonly object Gate = new();
 

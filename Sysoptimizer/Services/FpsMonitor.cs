@@ -187,7 +187,7 @@ public sealed class FpsMonitor : IDisposable
         var now = _gamesReadAt = DateTime.Now;
         var exes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var dirs = new List<string>();
-        bool shelf = Ecosystem.Card("shelf") != null;
+        bool shelf = Ecosystem.SisterExe("shelf", "Shelf") != null;
         if (!shelf) try
         {
             using var children = Registry.CurrentUser.OpenSubKey(@"System\GameConfigStore\Children");

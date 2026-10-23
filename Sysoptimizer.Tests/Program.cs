@@ -75,6 +75,25 @@ try
     var tail = AppLog.Tail(30);
     Check(tail.Length <= 30 && tail.Length > 0 && log.Contains("\n" + tail), "log: the tail is whole lines from the end");
 
+    // 1.20: the data folder moves from ProgramData to %APPDATA%\ProtagonistLabs\Sysoptimizer, here between synthetic folders.
+    string moves = Path.Combine(folder, "moves");
+    string Old(string name) { var d = Path.Combine(moves, name, "ProgramData", "Sysoptimizer"); Directory.CreateDirectory(Path.Combine(d, "history")); File.WriteAllText(Path.Combine(d, "history", "x.csv"), name); return d; }
+    string New(string name) => Path.Combine(moves, name, "Roaming", "ProtagonistLabs", "Sysoptimizer");
+    string from = Old("fresh"), to = New("fresh");
+    Check(HistoryStore.MoveData(from, to, out var note) == to && !Directory.Exists(from) && File.ReadAllText(Path.Combine(to, "history", "x.csv")) == "fresh" && note!.StartsWith("Data moved"),
+          "move: the old folder becomes the new one, whole");
+    Check(HistoryStore.MoveData(from, to, out note) == to && note == null, "move: done once, nothing to do the next time");
+    from = Old("empty"); to = New("empty"); Directory.CreateDirectory(to);
+    Check(HistoryStore.MoveData(from, to, out _) == to && !Directory.Exists(from) && File.Exists(Path.Combine(to, "history", "x.csv")), "move: an empty new folder is taken over");
+    from = Old("both"); to = New("both"); Directory.CreateDirectory(to); File.WriteAllText(Path.Combine(to, "keep.txt"), "new");
+    Check(HistoryStore.MoveData(from, to, out note) == to && File.Exists(Path.Combine(from, "history", "x.csv")) && !Directory.Exists(Path.Combine(to, "history")) && note!.StartsWith("Data left"),
+          "move: a new folder with data is never mixed with the old one");
+    from = Old("locked"); to = New("locked");
+    using (new FileStream(Path.Combine(from, "history", "x.csv"), FileMode.Open, FileAccess.Read, FileShare.None))
+        Check(HistoryStore.MoveData(from, to, out note) == from && File.Exists(Path.Combine(from, "history", "x.csv")) && note!.StartsWith("Couldn't move"),
+              "move: a file held open keeps the old folder in use, nothing half moved");
+    Check(HistoryStore.MoveData(from, to, out _) == to && File.Exists(Path.Combine(to, "history", "x.csv")), "move: and it goes at the next start");
+
     // What changed on the PC: apps that appeared, went or changed version; the list kept between runs.
     ChangeService.Folder = folder;
     Check(ChangeService.Load("apps-test.txt") == null, "changes: the first look finds no list from before");
@@ -471,8 +490,12 @@ try
     };
     File.WriteAllText(Path.Combine(eco, "apps", "shelf.json"), "{\"schema\":1,\"exe\":" + JsonSerializer.Serialize(@"C:\gone\Shelf.exe") + "}");
     Ecosystem.WriteControllers(devices);
-    Check(!File.Exists(pads), "controllers: nothing written while Shelf's card points at a missing exe");
+    // A card pointing at a missing exe falls back to the Uninstall entries, which on a PC with Shelf installed find it.
+    Check(File.Exists(pads) == (Ecosystem.SisterExe("shelf", "Shelf") != null), "controllers: nothing written while Shelf isn't installed (card gone, no Uninstall entry)");
+    if (File.Exists(pads)) File.Delete(pads);
+    Check(Ecosystem.SisterExe("nobody", "No Such App 9") == null, "sisters: neither a card nor an Uninstall entry is not installed");
     File.WriteAllText(Path.Combine(eco, "apps", "shelf.json"), "{\"schema\":1,\"exe\":" + JsonSerializer.Serialize(self) + "}");
+    Check(Ecosystem.SisterExe("shelf", "Shelf") == self, "sisters: the card comes first");
     Ecosystem.WriteControllers(devices);
     var padFile = Ecosystem.Read(pads);
     var padList = (padFile?["controllers"] as System.Text.Json.Nodes.JsonArray)?.Select(n => n!.AsObject()).ToList() ?? new();

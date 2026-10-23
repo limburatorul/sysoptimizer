@@ -123,7 +123,9 @@ public static class Updater
         return path;
     }
 
-    /// <summary>Hands off to a detached script and returns; the caller then quits so the installer can replace us.</summary>
+    /// <summary>Hands off to a detached script and returns; the caller then quits so the installer can replace us.
+    /// The installer starts the app again itself (its silent [Run] entry), from wherever it installed it: since 1.20 that
+    /// is no longer necessarily where this copy runs from.</summary>
     public static void InstallAndRestart(string installer)
     {
         var exe = Environment.ProcessPath;
@@ -132,8 +134,7 @@ public static class Updater
             @echo off
             :wait
             tasklist /FI "PID eq {Environment.ProcessId}" | find "{Environment.ProcessId}" >nul && (timeout /t 1 /nobreak >nul & goto wait)
-            {(Portable ? $"move /y \"{installer}\" \"{exe}\" >nul" : $"\"{installer}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART")}
-            start "" "{exe}"
+            {(Portable ? $"move /y \"{installer}\" \"{exe}\" >nul\r\nstart \"\" \"{exe}\"" : $"\"{installer}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART")}
             del "%~f0"
             """);
         Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { CreateNoWindow = true, UseShellExecute = false });

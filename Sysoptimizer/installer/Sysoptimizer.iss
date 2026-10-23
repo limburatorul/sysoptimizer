@@ -22,7 +22,10 @@ VersionInfoVersion={#AppVersion}
 ; The app itself requires admin at every launch (it stops services and writes HKLM), so installing
 ; per-machine costs nothing extra and puts it in the conventional place for a system tool.
 PrivilegesRequired=admin
-DefaultDirName={autopf}\{#AppName}
+; The studio's folder since 1.20. Before, Program Files\Sysoptimizer: an install from then is not reused (UsePreviousAppDir=no),
+; it moves here and the old folder is removed (RemoveLegacyInstall).
+DefaultDirName={autopf}\ProtagonistLabs\{#AppName}
+UsePreviousAppDir=no
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=auto
@@ -60,12 +63,20 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; Started with the installer's own (admin) rights: by default a postinstall entry runs as the signed-in user, and
 ; Windows refuses an exe that requires admin from there (CreateProcess error 740).
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent runascurrentuser
+; A self-update runs silently, and the app's updater no longer starts the app itself (it can't know the folder): this does.
+Filename: "{app}\{#AppExe}"; Flags: nowait runascurrentuser; Check: RestartAfterUpdate
 
 [UninstallDelete]
-; The recorded resource history.
+; The recorded resource history, the log and the rest of the app's data (in ProgramData before 1.20, if it never moved),
+; and its card in the shared folder.
+Type: filesandordirs; Name: "{userappdata}\ProtagonistLabs\{#AppName}"
 Type: filesandordirs; Name: "{commonappdata}\{#AppName}"
+Type: files; Name: "{userappdata}\ProtagonistLabs\apps\sysoptimizer.json"
 
 [Code]
+var
+  LegacyHandover: Boolean;
+
 { Setup cannot replace files the running app holds open, so stop it first. }
 procedure StopSysoptimizer();
 var
@@ -75,10 +86,95 @@ begin
   Sleep(300);
 end;
 
+{ The data moves from ProgramData to the studio's folder, while the app is stopped (the app does the same at start, for an
+  install made from another admin account). Same volume, so a rename: instant, never half done. A new folder that already
+  has data is left alone, and so is the old one when the rename fails: the app uses it and tries again at its next start. }
+procedure MoveData();
+var
+  OldDir, NewDir: String;
+  Found: TFindRec;
+  HasData: Boolean;
+  ResultCode: Integer;
+begin
+  OldDir := ExpandConstant('{commonappdata}\{#AppName}');
+  NewDir := ExpandConstant('{userappdata}\ProtagonistLabs\{#AppName}');
+  if not DirExists(OldDir) then Exit;
+  HasData := False;
+  if FindFirst(NewDir + '\*', Found) then
+  begin
+    try
+      repeat
+        if (Found.Name <> '.') and (Found.Name <> '..') then HasData := True;
+      until HasData or not FindNext(Found);
+    finally
+      FindClose(Found);
+    end;
+  end;
+  if HasData then
+  begin
+    Log('Data left in ' + OldDir + ': ' + NewDir + ' already has data');
+    Exit;
+  end;
+  RemoveDir(NewDir);
+  ForceDirectories(ExtractFileDir(NewDir));
+  if RenameFile(OldDir, NewDir) then
+  begin
+    Log('Data moved to ' + NewDir);
+    { ProgramData's permissions came along (the user could read but not delete their own files): take Roaming's. }
+    Exec(ExpandConstant('{sys}\icacls.exe'), '"' + NewDir + '" /reset /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end
+  else
+    Log('Could not move ' + OldDir + '; the app will try at its next start');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   StopSysoptimizer();
+  MoveData();
   Result := '';
+end;
+
+function RestartAfterUpdate(): Boolean;
+begin
+  Result := WizardSilent and not LegacyHandover;
+end;
+
+{ The install from before 1.20, in Program Files\Sysoptimizer: only its own files go, then the folder if that left it empty.
+  The self-update of those versions starts Program Files\Sysoptimizer\Sysoptimizer.exe once setup ends, so a silent setup
+  puts the new exe there for that one start: it hands over to the installed copy, which removes it. }
+procedure RemoveLegacyInstall();
+var
+  Legacy: String;
+begin
+  Legacy := ExpandConstant('{autopf}\{#AppName}');
+  if (CompareText(Legacy, ExpandConstant('{app}')) = 0) or not FileExists(Legacy + '\{#AppExe}') then Exit;
+  if WizardSilent then
+    LegacyHandover := FileCopy(ExpandConstant('{app}\{#AppExe}'), Legacy + '\{#AppExe}', False)
+  else
+    DeleteFile(Legacy + '\{#AppExe}');
+  DeleteFile(Legacy + '\Sysoptimizer.pdb');
+  DeleteFile(Legacy + '\sysoptimizer-mcp.exe');
+  DeleteFile(Legacy + '\unins000.exe');
+  DeleteFile(Legacy + '\unins000.dat');
+  RemoveDir(Legacy);
+end;
+
+{ The logon task starts the exe it was given. The app re-points it at every start, but until then it would start one that is gone. }
+procedure RepointLogonTask();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "if (Get-ScheduledTask -TaskName ''{#AppName}'' -ErrorAction SilentlyContinue) { ' +
+    'Set-ScheduledTask -TaskName ''{#AppName}'' -Action (New-ScheduledTaskAction -Execute ''' + ExpandConstant('{app}\{#AppExe}') +
+    ''' -Argument ''--tray'') | Out-Null }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep <> ssPostInstall then Exit;
+  RemoveLegacyInstall();
+  RepointLogonTask();
 end;
 
 function InitializeUninstall(): Boolean;

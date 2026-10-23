@@ -34,22 +34,28 @@ public sealed class WhatsNewWindow : Window
     {
         if (_open is not null) { _open.Activate(); return; }
         _open = new WhatsNewWindow();
-        _open.Closed += (_, _) => _open = null;
+        _open.Closed += (_, _) => { _open = null; MarkSeen(); };
         _open.Show();
     }
 
     /// <summary>
     /// Once after an update. A first install has nothing new to tell; a PC that recorded before today, which never
-    /// wrote down a version (everything before 1.19.3), is an update.
+    /// wrote down a version (everything before 1.19.3), is an update. Seen when the window is closed, not when it opens:
+    /// an app stopped with it still open (a restart, a shutdown) shows it again.
     /// </summary>
     public static void OpenOnceAfterUpdate()
     {
-        string current = Updater.Current.ToString(3);
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer");
         string? seen = key.GetValue("LastSeenVersion") as string;
-        if (seen == current) return;
-        key.SetValue("LastSeenVersion", current);
+        if (seen == Updater.Current.ToString(3)) return;
         if (seen != null || HistoryStore.OldestDay() < DateTime.Today) Open();
+        else MarkSeen();
+    }
+
+    private static void MarkSeen()
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Sysoptimizer");
+        key.SetValue("LastSeenVersion", Updater.Current.ToString(3));
     }
 
     private static List<Release> Load()
