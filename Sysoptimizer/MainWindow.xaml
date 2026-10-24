@@ -582,7 +582,7 @@
                             </DockPanel>
                         </Border>
                                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="16,14,16,0">
-                                    <RadioButton Content="Clean up" GroupName="ToolsGroups" Tag="{Binding ElementName=CleanGroup}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" ToolTip="Temporary files, pre-installed apps, uninstalling programs" />
+                                    <RadioButton Content="Clean up" GroupName="ToolsGroups" Tag="{Binding ElementName=CleanGroup}" Style="{StaticResource PillToggle}" IsChecked="True" Checked="SubPage_Checked" ToolTip="Temporary files and pre-installed apps" />
                                     <RadioButton Content="Speed up" GroupName="ToolsGroups" Tag="{Binding ElementName=SpeedGroup}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" ToolTip="What starts with Windows, services, tweaks" />
                                     <RadioButton Content="Apps" GroupName="ToolsGroups" Tag="{Binding ElementName=InstallPage}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" ToolTip="Install and update apps with winget" />
                                     <RadioButton Content="Files" GroupName="ToolsGroups" Tag="{Binding ElementName=FilesGroup}" Style="{StaticResource PillToggle}" Margin="6,0,0,0" Checked="SubPage_Checked" ToolTip="Duplicate and large files" />
