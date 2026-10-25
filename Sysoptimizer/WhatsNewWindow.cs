@@ -15,7 +15,7 @@ namespace Sysoptimizer;
 /// What's new, as the studio's other apps show it: every release in a list on the left, under the month it came out,
 /// and the chosen one on the right under its 960 x 170 banner. The notes are whatsnew.txt, built into the exe, so it
 /// works offline and shows every release. A release with a picture of its own (WhatsNew\x.y.jpg, made at 1920 x 340
-/// from the studio's banner template, the month it came out) shows it; older ones get the app's colours and version.
+/// from the studio's banner template, the month it came out) shows it; the others show their month's, WhatsNew\mMM.jpg.
 /// </summary>
 public sealed class WhatsNewWindow : Window
 {
@@ -200,41 +200,18 @@ public sealed class WhatsNewWindow : Window
         return t;
     }
 
-    /// <summary>The release's picture (x.y.jpg, built in), or the app's colours under its version and title.</summary>
+    /// <summary>The release's picture (x.y.jpg, built in), or the one for the month it came out (mMM.jpg).</summary>
     private static UIElement Banner(Release r)
     {
-        using var stream = typeof(WhatsNewWindow).Assembly.GetManifestResourceStream($"Sysoptimizer.WhatsNew.{r.Version}.jpg");
-        if (stream is not null)
-        {
-            var picture = new BitmapImage();
-            picture.BeginInit();
-            picture.CacheOption = BitmapCacheOption.OnLoad;
-            picture.StreamSource = stream;
-            picture.EndInit();
-            picture.Freeze();
-            return new Image { Source = picture, Width = 960, Height = 170, Stretch = Stretch.UniformToFill };
-        }
-
-        // the banner template's Sysoptimizer colours: teal and sky over a dark teal ground, a graph running through it
-        var ground = new LinearGradientBrush(Color.FromRgb(0x09, 0x18, 0x17), Color.FromRgb(0x0C, 0x24, 0x24), 20);
-        var glow = new System.Windows.Shapes.Ellipse
-        {
-            Width = 560, Height = 380,
-            Fill = new RadialGradientBrush(Color.FromArgb(0x55, 0x2D, 0xD4, 0xBF), Color.FromArgb(0, 0x2D, 0xD4, 0xBF)),
-        };
-        var art = new Canvas { Width = 960, Height = 170, ClipToBounds = true };
-        Canvas.SetLeft(glow, 520); Canvas.SetTop(glow, -150);
-        art.Children.Add(glow);
-        var v = r.Version.Split('.').Select(int.Parse).ToArray();
-        var rnd = new Random(v[0] * 100 + v[1]);     // seeded by the version: a release looks the same every time
-        var line = new PointCollection();
-        double y = 110;
-        for (int x = 360; x <= 960; x += 20) { y = Math.Clamp(y + (rnd.NextDouble() - 0.5) * 40, 60, 150); line.Add(new Point(x, y)); }
-        art.Children.Add(new System.Windows.Shapes.Polyline { Points = line, Stroke = new SolidColorBrush(Color.FromArgb(0xB0, 0x2D, 0xD4, 0xBF)), StrokeThickness = 2 });
-        var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(26, 0, 0, 0), MaxWidth = 560, HorizontalAlignment = HorizontalAlignment.Left };
-        words.Children.Add(new TextBlock { Text = "WHAT’S NEW IN", FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 255, 255, 255)) });
-        words.Children.Add(new TextBlock { Text = r.Version, FontSize = 34, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White });
-        words.Children.Add(new TextBlock { Text = r.Title, FontSize = 14, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromArgb(0xE6, 255, 255, 255)) });
-        return new Grid { Width = 960, Height = 170, Background = ground, Children = { art, words } };
+        var assembly = typeof(WhatsNewWindow).Assembly;
+        using var stream = assembly.GetManifestResourceStream($"Sysoptimizer.WhatsNew.{r.Version}.jpg")
+            ?? assembly.GetManifestResourceStream($"Sysoptimizer.WhatsNew.m{r.Date:MM}.jpg");
+        var picture = new BitmapImage();
+        picture.BeginInit();
+        picture.CacheOption = BitmapCacheOption.OnLoad;
+        picture.StreamSource = stream;
+        picture.EndInit();
+        picture.Freeze();
+        return new Image { Source = picture, Width = 960, Height = 170, Stretch = Stretch.UniformToFill };
     }
 }
