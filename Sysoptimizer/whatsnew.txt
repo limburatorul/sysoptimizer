@@ -10,6 +10,7 @@
 - **A new icon**, brighter and easier to spot in the taskbar and the tray.
 - What's new now shows a picture for each release.
 - **Buy me a pizza** in Settings, if you'd like to chip in. It's optional, and it goes toward code signing and a Steam listing.
+- **Duplicates shows its results again.** The list came up empty after a scan, though the extra copies were ticked and Delete selected would have removed them. If you have used it, check the folder you scanned. You now see every group and every path before you delete anything.
 
 ## 1.20 | 2026-10-23 | One home for every Protagonist Labs app
 Sysoptimizer moves in with the studio's other apps: one folder for the programs, one for their data.

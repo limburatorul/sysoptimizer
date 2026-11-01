@@ -26,10 +26,11 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<OptionItem> _largeFileItems = new();
     private readonly List<Tweak> _tweaks = TweakService.GetTweaks();
 
-    private class DuplicateGroupView
+    // Public, with properties: the list's template binds to these, and WPF binds nothing else.
+    public sealed class DuplicateGroupView
     {
-        public required string Header;
-        public required ObservableCollection<OptionItem> Files;
+        public required string Header { get; init; }
+        public required ObservableCollection<OptionItem> Files { get; init; }
     }
 
     private ResourceMonitor? _resourceMonitor;
@@ -1187,7 +1188,7 @@ public partial class MainWindow : Window
         {
             var files = new ObservableCollection<OptionItem>();
             for (int i = 0; i < group.Paths.Count; i++)
-                files.Add(new OptionItem { Description = group.Paths[i], IsChecked = i > 0, Tag = group.Paths[i] }); // first copy kept by default
+                files.Add(new OptionItem { Name = group.Paths[i], Description = group.Paths[i], IsChecked = i > 0, Tag = group.Paths[i] }); // first copy kept by default
             _duplicateGroups.Add(new DuplicateGroupView { Header = $"{CleanupService.FormatSize(group.Size)} × {group.Paths.Count} copies", Files = files });
         }
         Log($"Found {groups.Count} duplicate group{(groups.Count == 1 ? "" : "s")}.");
