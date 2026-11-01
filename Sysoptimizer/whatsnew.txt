@@ -9,6 +9,7 @@
 - **Uninstall** has left Tools → Clean. Our new free app **Uproot** does it better: a list that opens and searches instantly, several apps at once, and the folders and registry keys they leave behind. It's in About → Works with.
 - **A new icon**, brighter and easier to spot in the taskbar and the tray.
 - What's new now shows a picture for each release.
+- **Buy me a pizza** in Settings, if you'd like to chip in. It's optional, and it goes toward code signing and a Steam listing.
 
 ## 1.20 | 2026-10-23 | One home for every Protagonist Labs app
 Sysoptimizer moves in with the studio's other apps: one folder for the programs, one for their data.

@@ -27,6 +27,7 @@
     <Compile Include="..\Sysoptimizer\Services\PeripheralReports.cs" Link="PeripheralReports.cs" />
     <Compile Include="..\Sysoptimizer\Models\ResourceSnapshot.cs" Link="ResourceSnapshot.cs" />
     <EmbeddedResource Include="..\Sysoptimizer\whatsnew.txt" LogicalName="Sysoptimizer.whatsnew.txt" />
+    <EmbeddedResource Include="..\Sysoptimizer\WhatsNew\*.jpg" LogicalName="Sysoptimizer.WhatsNew.%(Filename).jpg" />
   </ItemGroup>
 
 </Project>

@@ -156,7 +156,7 @@ public sealed class WhatsNewWindow : Window
             else buttons[b].Background = Brushes.Transparent;
         buttons[i].BringIntoView();
 
-        _banner.Child = new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = Banner(r) };
+        _banner.Child = Banner(r) is { } picture ? new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = picture } : null;
         _notes.Children.Clear();
         _notes.Children.Add(Dim(new TextBlock { Text = r.Date.ToString("d MMMM yyyy", CultureInfo.InvariantCulture), Margin = new Thickness(0, 0, 0, 8) }));
         foreach (var line in r.Lines)
@@ -200,12 +200,13 @@ public sealed class WhatsNewWindow : Window
         return t;
     }
 
-    /// <summary>The release's picture (x.y.jpg, built in), or the one for the month it came out (mMM.jpg).</summary>
-    private static UIElement Banner(Release r)
+    /// <summary>The release's picture (x.y.jpg, built in), or the one for the month it came out (mMM.jpg); null without either.</summary>
+    private static UIElement? Banner(Release r)
     {
         var assembly = typeof(WhatsNewWindow).Assembly;
         using var stream = assembly.GetManifestResourceStream($"Sysoptimizer.WhatsNew.{r.Version}.jpg")
             ?? assembly.GetManifestResourceStream($"Sysoptimizer.WhatsNew.m{r.Date:MM}.jpg");
+        if (stream is null) return null;
         var picture = new BitmapImage();
         picture.BeginInit();
         picture.CacheOption = BitmapCacheOption.OnLoad;

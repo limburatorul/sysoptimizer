@@ -581,6 +581,8 @@ using (var notes = new StreamReader(typeof(Updater).Assembly.GetManifestResource
         && DateTime.TryParseExact(h[1].Trim(), "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _));
     Check(parsed, "what's new: every release header parses");
     Check(parsed && heads.Zip(heads.Skip(1)).All(p => Version.Parse(p.First[0].Trim()) > Version.Parse(p.Second[0].Trim())), "what's new: newest first");
+    var pictures = typeof(Updater).Assembly.GetManifestResourceNames();
+    Check(parsed && heads.All(h => pictures.Contains($"Sysoptimizer.WhatsNew.{h[0].Trim()}.jpg") || pictures.Contains($"Sysoptimizer.WhatsNew.m{h[1].Trim()[5..7]}.jpg")), "what's new: every release has a picture");
 }
 
 Console.WriteLine(failures == 0 ? "\nAll checks passed." : $"\n{failures} check(s) failed.");
