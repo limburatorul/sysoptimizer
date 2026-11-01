@@ -4,6 +4,16 @@
 # WhatsNew\<x.y>.jpg (1920 x 340, made from the studio's banner template, the month it came out); the others
 # show their month's picture, WhatsNew\m<MM>.jpg, which must exist for every month listed.
 
+## 1.22 | 2026-11-01 | Five new themes, from Sparta to Windows XP
+Five new looks, for a bit of nostalgia. Pick one from the list at the bottom of the window, which previews each as you hover it.
+**From the games**
+- **God of War**, from the first three games: charred stone, ash, Kratos' red and the gold of Olympus.
+- **Need for Speed**, from Most Wanted (2005): Rockport's amber haze, the blue of the M3 GTR and a police light bar.
+**From Windows**
+- **Windows XP**: the beige windows, the blue title bar and the orange line on the chosen tab.
+- **Windows Vista**: dark glass, with the aqua of the orb and the green of its aurora.
+- **Windows 7**: pale sky-blue windows with white panes.
+
 ## 1.21 | 2026-10-23 | Cleaner graphs, one job less
 - The **100%** mark sits back at the top of the CPU and Memory graphs: the Per thread and Free memory buttons moved left of the scale instead of pushing it down.
 - **Uninstall** has left Tools → Clean. Our new free app **Uproot** does it better: a list that opens and searches instantly, several apps at once, and the folders and registry keys they leave behind. It's in About → Works with.

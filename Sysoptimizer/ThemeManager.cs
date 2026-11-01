@@ -55,6 +55,11 @@ public static class ThemeManager
         new("Matrix", "Matrix", false, (0x000000, 0x41FF00, 0x1A3D0F)),
         new("Witcher", "Witcher", false, (0x0C0D0E, 0xD0E0E8, 0x2C343A)),
         new("Starfield", "Starfield", true, (0x18130F, 0xF5F1EE, 0x40342B)),
+        new("GodOfWar", "God of War", true, (0x07090D, 0xD6E5EF, 0x1A263D)),
+        new("NeedForSpeed", "Need for Speed", true, (0x0D0C0C, 0x23A6F5, 0x20313B)),
+        new("WindowsXP", "Windows XP", false, (0xE35400, 0xFFFFFF, 0xE35400)),
+        new("WindowsVista", "Windows Vista", false, (0x1C140A, 0xFFFFFF, 0x4A3A28)),
+        new("Windows7", "Windows 7", false, (0xB5783F, 0xFFFFFF, 0xB5783F)),
     };
 
     public static ThemeInfo Current { get; private set; } = Themes[0];

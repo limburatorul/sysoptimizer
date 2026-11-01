@@ -1,0 +1,104 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!-- Windows XP, Luna: the beige window behind the blue title bar, white cards, the orange line on the chosen tab, and the graphs in Luna blue, the green of the Start button and the flag's orange. -->
+
+    <!-- Surfaces and text -->
+    <SolidColorBrush x:Key="Surface" Color="#FFECE9D8" />
+    <SolidColorBrush x:Key="SurfaceElevated" Color="#FFE3DFC9" />
+    <SolidColorBrush x:Key="Border" Color="#FFACA899" />
+    <LinearGradientBrush x:Key="CardBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFFFFFFF" Offset="0" />
+        <GradientStop Color="#FFF7F6EE" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="TextPrimary" Color="#FF000000" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#FF5A5A52" />
+    <SolidColorBrush x:Key="LogForeground" Color="#FF000000" />
+
+    <!-- Accent -->
+    <SolidColorBrush x:Key="Accent" Color="#FF0A5AD6" />
+    <SolidColorBrush x:Key="AccentDim" Color="#400A5AD6" />
+    <SolidColorBrush x:Key="OnAccent" Color="#FFFFFFFF" />
+
+    <!-- Scrollbar -->
+    <SolidColorBrush x:Key="ScrollThumb" Color="#FFC1D2EE" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#B00A5AD6" />
+    <SolidColorBrush x:Key="ScrollThumbActive" Color="#FF0A5AD6" />
+
+    <!-- One color per metric for CPU / Memory / GPU -->
+    <SolidColorBrush x:Key="AccentCpu" Color="#FF245EDC" />
+    <SolidColorBrush x:Key="AccentMem" Color="#FF3A9A2C" />
+    <SolidColorBrush x:Key="AccentGpu" Color="#FFE2701A" />
+
+    <!-- Good / warning / bad -->
+    <SolidColorBrush x:Key="StatusGood" Color="#FF2F8F24" />
+    <SolidColorBrush x:Key="StatusWarn" Color="#FFD97A00" />
+    <SolidColorBrush x:Key="StatusBad" Color="#FFD0301F" />
+    <!-- Temperature band under the History chart: cool at rest, warm by 78 °C, StatusBad at 90 °C -->
+    <SolidColorBrush x:Key="TempCool" Color="#FFB9C8E8" />
+    <SolidColorBrush x:Key="TempWarm" Color="#FFF09030" />
+
+    <!-- Tabs -->
+    <SolidColorBrush x:Key="TabBackground" Color="#FFE3DFC9" />
+    <SolidColorBrush x:Key="TabBackgroundSelected" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="TabForeground" Color="#FF3C3C34" />
+    <SolidColorBrush x:Key="TabForegroundSelected" Color="#FF000000" />
+    <SolidColorBrush x:Key="TabIndicator" Color="#FFF9A825" />
+    <Thickness x:Key="TabIndicatorThickness">0,3,0,0</Thickness>
+    <Thickness x:Key="TabMargin">0,0,2,0</Thickness>
+    <Thickness x:Key="TabPadding">13,10</Thickness>
+
+    <!-- Buttons, pills, checkboxes -->
+    <LinearGradientBrush x:Key="ButtonBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFFFFFFF" Offset="0" />
+        <GradientStop Color="#FFECEBE6" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="ButtonForeground" Color="#FF000000" />
+    <SolidColorBrush x:Key="ButtonBorder" Color="#FF003C74" />
+    <SolidColorBrush x:Key="ButtonHoverBorder" Color="#FFF9A825" />
+    <SolidColorBrush x:Key="PillBackground" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PillForeground" Color="#FF3C3C34" />
+    <SolidColorBrush x:Key="PillBackgroundSelected" Color="#FF0A5AD6" />
+    <SolidColorBrush x:Key="PillBorderSelected" Color="#FF0A5AD6" />
+    <SolidColorBrush x:Key="PillForegroundSelected" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="CheckBorder" Color="#FF1C5180" />
+    <Thickness x:Key="ControlBorderThickness">1</Thickness>
+
+    <!-- Shape -->
+    <CornerRadius x:Key="CardRadius">4</CornerRadius>
+    <CornerRadius x:Key="ControlRadius">3</CornerRadius>
+    <CornerRadius x:Key="PillRadius">3</CornerRadius>
+    <CornerRadius x:Key="CheckRadius">2</CornerRadius>
+    <CornerRadius x:Key="PopupRadius">3</CornerRadius>
+    <CornerRadius x:Key="TabRadius">3</CornerRadius>
+
+    <!-- Type and line weight -->
+    <FontFamily x:Key="UiFont">Tahoma, Segoe UI</FontFamily>
+    <sys:Double x:Key="GraphStroke">1.8</sys:Double>
+
+    <!-- Glow -->
+    <DropShadowEffect x:Key="LineGlow" Color="#0A5AD6" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowCpu" Color="#245EDC" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowMem" Color="#3A9A2C" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+    <DropShadowEffect x:Key="LineGlowGpu" Color="#E2701A" BlurRadius="0" ShadowDepth="0" Opacity="0" />
+
+    <!-- Area under each curve -->
+    <LinearGradientBrush x:Key="AreaFill" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#380A5AD6" Offset="0" />
+        <GradientStop Color="#000A5AD6" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AreaFillCpu" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#38245EDC" Offset="0" />
+        <GradientStop Color="#00245EDC" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AreaFillMem" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#383A9A2C" Offset="0" />
+        <GradientStop Color="#003A9A2C" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AreaFillGpu" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#38E2701A" Offset="0" />
+        <GradientStop Color="#00E2701A" Offset="1" />
+    </LinearGradientBrush>
+
+</ResourceDictionary>
