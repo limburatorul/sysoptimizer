@@ -136,6 +136,26 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) => await LoadStatusesAsync();
         StartUpdateChecks();
+        StartPizzaNudge();
+    }
+
+    private void Pizza_Click(object sender, RoutedEventArgs e) => OpenUrl("https://buymeacoffee.com/protagonistlabs");
+
+    /// <summary>The pizza button pulses 3 s after the window first shows, then every 10 s — only while the window
+    /// is on screen (the timer stops in the tray), never under the pointer, never with Windows' animations off.</summary>
+    private void StartPizzaNudge()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        var pulse = (System.Windows.Media.Animation.Storyboard)PizzaButton.Resources["Pulse"];
+        timer.Tick += (_, _) =>
+        {
+            timer.Interval = TimeSpan.FromSeconds(10);
+            if (!PizzaButton.IsMouseOver && SystemParameters.ClientAreaAnimation) pulse.Begin(PizzaButton);
+        };
+        void Update() => timer.IsEnabled = IsVisible && WindowState != WindowState.Minimized;
+        IsVisibleChanged += (_, _) => Update();
+        StateChanged += (_, _) => Update();
+        Closed += (_, _) => timer.Stop();
     }
 
     // Everything here launches external processes (sc, powershell, winget) — run after the window

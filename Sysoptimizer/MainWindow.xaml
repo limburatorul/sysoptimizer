@@ -1034,12 +1034,6 @@
                                     </Border>
                                     <Border>
                                         <StackPanel>
-                                            <TextBlock FontWeight="SemiBold"><Hyperlink NavigateUri="https://buymeacoffee.com/protagonistlabs" RequestNavigate="Link_Navigate">&#x1F355; Buy me a pizza</Hyperlink></TextBlock>
-                                            <TextBlock Text="Optional. It goes toward code signing and a Steam listing." Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
-                                    <Border>
-                                        <StackPanel>
                                             <TextBlock FontWeight="SemiBold"><Hyperlink NavigateUri="https://protagonistlabs.app/sysoptimizer/?utm_source=sysoptimizer&amp;utm_medium=app&amp;utm_campaign=about" RequestNavigate="Link_Navigate">Website</Hyperlink></TextBlock>
                                             <TextBlock Text="protagonistlabs.app/sysoptimizer" Foreground="{DynamicResource TextSecondary}" FontSize="11" />
                                         </StackPanel>
@@ -1160,6 +1154,50 @@
         <Border Grid.Row="1" Background="{DynamicResource SurfaceElevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
             <DockPanel Margin="16,10">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <!-- its own template: red in every theme, and the theme's upper-casing and pressed colour left out; the nudge is in StartPizzaNudge -->
+                    <Button x:Name="PizzaButton" DockPanel.Dock="Right" Content="&#x1F355; Buy me a pizza" Foreground="White" FontWeight="SemiBold" Padding="14,5" VerticalAlignment="Center"
+                            RenderTransformOrigin="0.5,0.5" Click="Pizza_Click" AutomationProperties.Name="Buy me a pizza" ToolTip="Optional. It goes toward code signing and a Steam listing.">
+                        <Button.Background><SolidColorBrush Color="#D63A3A" /></Button.Background>
+                        <Button.RenderTransform><ScaleTransform /></Button.RenderTransform>
+                        <Button.Resources>
+                            <!-- 1 → 1.06 → 1 → 1.03 → 1 in 700 ms, brighter at the peaks -->
+                            <Storyboard x:Key="Pulse">
+                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="RenderTransform.ScaleX">
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.175" Value="1.06" KeySpline="0.23,1 0.32,1" />
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.35" Value="1" KeySpline="0.23,1 0.32,1" />
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.525" Value="1.03" KeySpline="0.23,1 0.32,1" />
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.7" Value="1" KeySpline="0.23,1 0.32,1" />
+                                </DoubleAnimationUsingKeyFrames>
+                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="RenderTransform.ScaleY">
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.175" Value="1.06" KeySpline="0.23,1 0.32,1" />
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.35" Value="1" KeySpline="0.23,1 0.32,1" />
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.525" Value="1.03" KeySpline="0.23,1 0.32,1" />
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.7" Value="1" KeySpline="0.23,1 0.32,1" />
+                                </DoubleAnimationUsingKeyFrames>
+                                <ColorAnimationUsingKeyFrames Storyboard.TargetProperty="Background.Color">
+                                    <SplineColorKeyFrame KeyTime="0:0:0.175" Value="#F25555" KeySpline="0.23,1 0.32,1" />
+                                    <SplineColorKeyFrame KeyTime="0:0:0.35" Value="#D63A3A" KeySpline="0.23,1 0.32,1" />
+                                    <SplineColorKeyFrame KeyTime="0:0:0.525" Value="#F25555" KeySpline="0.23,1 0.32,1" />
+                                    <SplineColorKeyFrame KeyTime="0:0:0.7" Value="#D63A3A" KeySpline="0.23,1 0.32,1" />
+                                </ColorAnimationUsingKeyFrames>
+                            </Storyboard>
+                        </Button.Resources>
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource ControlRadius}">
+                                    <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#E54848" />
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#BF3030" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
                     <StackPanel Orientation="Horizontal">
                         <ToggleButton x:Name="LogToggle" Content="Log" Style="{StaticResource PillToggle}" IsChecked="False"
                                       ToolTip="Show or hide the log" AutomationProperties.Name="Show log" />
