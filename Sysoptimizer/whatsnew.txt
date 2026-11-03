@@ -13,6 +13,8 @@ Five new looks, for a bit of nostalgia. Pick one from the list at the bottom of 
 - **Windows XP**: the beige windows, the blue title bar and the orange line on the chosen tab.
 - **Windows Vista**: dark glass, with the aqua of the orb and the green of its aurora.
 - **Windows 7**: pale sky-blue windows with white panes.
+**A way to chip in**
+- **Buy me a pizza** has moved from Settings to the bottom bar, beside the theme list, so it's there on every tab. It's optional, and it goes toward code signing and a Steam listing.
 
 ## 1.21 | 2026-10-23 | Cleaner graphs, one job less
 - The **100%** mark sits back at the top of the CPU and Memory graphs: the Per thread and Free memory buttons moved left of the scale instead of pushing it down.
