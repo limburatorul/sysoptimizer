@@ -15,6 +15,8 @@ Five new looks, for a bit of nostalgia. Pick one from the list at the bottom of 
 - **Windows 7**: pale sky-blue windows with white panes.
 **A way to chip in**
 - **Buy me a pizza** has moved from Settings to the bottom bar, beside the theme list, so it's there on every tab. It's optional, and it goes toward code signing and a Steam listing.
+**Notifications in your theme**
+- Alerts, the weekly report and new versions now show up as Sysoptimizer's own cards in the corner, in the theme you picked, instead of Windows' balloons. They wait while a game runs full screen and never take the focus.
 
 ## 1.21 | 2026-10-23 | Cleaner graphs, one job less
 - The **100%** mark sits back at the top of the CPU and Memory graphs: the Per thread and Free memory buttons moved left of the scale instead of pushing it down.

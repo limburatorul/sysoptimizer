@@ -355,7 +355,6 @@ public partial class MainWindow
     // --- Background / tray ---
 
     private System.Windows.Forms.NotifyIcon? _tray;
-    private string? _balloonOpens; // the report the last balloon announced
     private bool _exiting;
 
     private void SetupTray()
@@ -375,12 +374,6 @@ public partial class MainWindow
             Visible = true,
         };
         _tray.DoubleClick += (_, _) => ShowFromTray();
-        _tray.BalloonTipClicked += (_, _) =>
-        {
-            if (_balloonOpens is { } report) Process.Start(new ProcessStartInfo(report) { UseShellExecute = true });
-            else ShowFromTray();
-            _balloonOpens = null;
-        };
     }
 
     /// <summary>The tray icon's tooltip names each wireless device and its battery (Windows cuts a tooltip at 127 characters).</summary>

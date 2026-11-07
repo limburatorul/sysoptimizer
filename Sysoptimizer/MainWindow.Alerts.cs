@@ -356,17 +356,16 @@ public partial class MainWindow
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
-    /// <summary>Notifies once per subject per half hour: a tray balloon, the log, and an event in the history.</summary>
+    /// <summary>Notifies once per subject per half hour: a notice, the log, and an event in the history.</summary>
     private void Alert(string key, string text)
     {
         var now = DateTime.UtcNow;
         if (_alertedAt.TryGetValue(key, out var last) && now - last < AlertCooldown) return;
         _alertedAt[key] = now;
-        _balloonOpens = null; // a click on this balloon opens the window, not an earlier report
         Log($"Alert: {text}");
         try { HistoryStore.WriteEvent("alert", text); }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { } // the log line above still has it
-        _tray?.ShowBalloonTip(10000, "Sysoptimizer alert", text.Length > 250 ? text[..250] : text, System.Windows.Forms.ToolTipIcon.Warning);
+        Notice.Post("Sysoptimizer alert", text.Length > 250 ? text[..250] : text, warning: true, "Open Sysoptimizer", ShowFromTray);
         if (EventsList.IsVisible) _ = LoadEvents();
     }
 }

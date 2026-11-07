@@ -180,8 +180,8 @@ public partial class MainWindow
         }
         string? path = await MakeReport(monday.AddDays(-7), monday);
         if (path == null) return;
-        _balloonOpens = path;
-        _tray?.ShowBalloonTip(10000, "Sysoptimizer", "Your PCs' weekly report is ready — click to open it.", System.Windows.Forms.ToolTipIcon.Info);
+        Notice.Post("Your weekly report is ready", "How your PCs did last week, in one page.", warning: false, "Open the report",
+            () => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }));
     }
 
     private async void Report_Click(object sender, RoutedEventArgs e)

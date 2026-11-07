@@ -271,13 +271,12 @@ public partial class MainWindow : Window
         if (release == null) return manual ? $"Sysoptimizer {Updater.Current} is the latest version." : null;
         if (!IsVisible)
         {
-            // Recording in the tray for days: the dialog needs the window, so say it from the tray instead —
-            // once per version — and clicking the notification opens the window with the dialog.
-            if (_tray != null && _updateNotified != release.Tag)
+            // Recording in the tray for days: the dialog needs the window, so say it with a notice instead —
+            // once per version — and its button opens the window with the dialog.
+            if (_updateNotified != release.Tag)
             {
                 _updateNotified = release.Tag;
-                _tray.ShowBalloonTip(15000, $"Sysoptimizer {release.Version} is available",
-                    "Click to see what's new and install it.", System.Windows.Forms.ToolTipIcon.Info);
+                Notice.Post($"Sysoptimizer {release.Version} is available", "See what's new and install it.", warning: false, "See the update", ShowFromTray);
             }
             return null;
         }
